@@ -86,7 +86,9 @@ async function handleMessage(ctx) {
     }
 
     case STEPS.AWAITING_PROOF: {
-      // Text link as proof
+      if (text.length < 5) {
+        return ctx.reply('❌ Слишком коротко. Отправьте скриншот или ссылку на перевод.');
+      }
       await submitDonation(ctx, userId, session, text, null);
       break;
     }
@@ -132,27 +134,18 @@ async function handlePaymentChoice(ctx) {
   await ctx.editMessageText(`✅ Способ оплаты: ${method}`);
   await ctx.reply(
     '📸 *Отправьте скриншот подтверждения оплаты*\n\n' +
-    'Это нужно для проверки донации. Можно:\n' +
-    '• Скриншот из Kaspi\n' +
-    '• Фото чека\n' +
-    '• Ссылку на перевод\n\n' +
-    'Или пропустите (донация будет на ручной проверке):',
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'skip_proof')]]),
-    }
+    'Без доказательства заявка не будет сохранена.\n\n' +
+    'Можно отправить:\n' +
+    '• 📷 Скриншот из Kaspi / банка\n' +
+    '• 🖼 Фото чека\n' +
+    '• 🔗 Ссылку на перевод (текстом)',
+    { parse_mode: 'Markdown' }
   );
 }
 
 async function handleSkipProof(ctx) {
-  const userId = ctx.from.id;
-  const session = getSession(userId);
-
-  if (session.step !== STEPS.AWAITING_PROOF) return ctx.answerCbQuery();
-
-  await ctx.answerCbQuery();
-  await ctx.editMessageText('📎 Подтверждение: не указано — будет ручная проверка');
-  await submitDonation(ctx, userId, session, '', null);
+  // Proof is now mandatory — skip is no longer allowed
+  await ctx.answerCbQuery('❌ Доказательство обязательно', { show_alert: true });
 }
 
 async function submitDonation(ctx, userId, session, proofLink, proofPhotoId) {
