@@ -36,7 +36,8 @@ async function handleBalance(ctx) {
       `\n${'━'.repeat(28)}\n` +
       `🕐 *Последние подтверждённые:*\n${recentLines}\n\n` +
       `${'━'.repeat(28)}\n` +
-      `🔍 Данные хранятся в открытой таблице.\n` +
+      `🔍 Данные хранятся в открытой таблице:\n` +
+      (process.env.SPREADSHEET_URL ? `📎 ${process.env.SPREADSHEET_URL}\n` : '') +
       `/queue — полная очередь`,
       { parse_mode: 'Markdown' }
     );

@@ -11,10 +11,10 @@ const COL = {
   AMOUNT: 2,
   PAYMENT_METHOD: 3,
   PROOF_LINK: 4,
-  STATUS: 5,        // pending / approved / rejected / paid
+  STATUS: 5,        // pending / approved / rejected / awaiting_confirm / paid
   QUEUE_POSITION: 6,
   CREATED_AT: 7,
-  PAID_AT: 8,       // timestamp when marked paid
+  PAID_AT: 8,       // timestamp when confirmed paid
 };
 
 let sheetsClient = null;
@@ -176,14 +176,34 @@ async function getPendingUsers() {
     }));
 }
 
-// Mark donation as paid — full cycle: pending→approved→paid
+// Admin marks as sent → status becomes awaiting_confirm (user must /confirm)
 async function markAsPaid(userId) {
   const found = await findUserRow(userId);
   if (!found) return false;
 
   const sheets = await getClient();
-  const paidAt = new Date().toISOString();
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!F${found.rowIndex}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [['awaiting_confirm']] },
+  });
 
+  return {
+    name: found.data[COL.NAME],
+    amount: found.data[COL.AMOUNT],
+    queuePosition: found.data[COL.QUEUE_POSITION],
+  };
+}
+
+// User confirms receipt → status becomes paid
+async function confirmReceipt(userId) {
+  const found = await findUserRow(userId);
+  if (!found) return null;
+  if (found.data[COL.STATUS] !== 'awaiting_confirm') return { status: found.data[COL.STATUS] };
+
+  const sheets = await getClient();
+  const paidAt = new Date().toISOString();
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `${SHEET_NAME}!F${found.rowIndex}:I${found.rowIndex}`,
@@ -192,6 +212,7 @@ async function markAsPaid(userId) {
   });
 
   return {
+    confirmed: true,
     name: found.data[COL.NAME],
     amount: found.data[COL.AMOUNT],
     queuePosition: found.data[COL.QUEUE_POSITION],
@@ -329,6 +350,7 @@ module.exports = {
   addDonation,
   updateStatus,
   markAsPaid,
+  confirmReceipt,
   getUserStatus,
   getApprovedQueue,
   getLastApproved,

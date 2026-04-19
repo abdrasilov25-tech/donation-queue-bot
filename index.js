@@ -11,6 +11,7 @@ const { handleList } = require('./src/handlers/list');
 const { handleBalance, handleStats, handleSetGoal } = require('./src/handlers/stats');
 const { handleBroadcast } = require('./src/handlers/broadcast');
 const { handleResubmit } = require('./src/handlers/resubmit');
+const { handleConfirm } = require('./src/handlers/confirm');
 const { getSession, STEPS } = require('./src/state');
 const { startScheduler } = require('./src/scheduler');
 
@@ -32,6 +33,7 @@ bot.command('stats', handleStats);
 bot.command('счет', handleBalance);
 bot.command('setgoal', handleSetGoal);
 bot.command('resubmit', handleResubmit);
+bot.command('confirm', handleConfirm);
 bot.command('broadcast', handleBroadcast);
 
 // Admin commands
@@ -51,6 +53,7 @@ bot.command('help', (ctx) => {
     '/stats — статистика системы\n' +
     '/list — последние 10 донаций\n' +
     '/resubmit — повторная подача (для отклонённых)\n' +
+    '/confirm — подтвердить получение выплаты\n' +
     '/help — помощь',
     { parse_mode: 'Markdown' }
   );

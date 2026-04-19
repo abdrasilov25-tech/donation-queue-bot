@@ -184,21 +184,23 @@ async function handlePaid(ctx) {
     const stats = await getStats();
 
     await ctx.reply(
-      `✅ *Выплата подтверждена!*\n\n` +
+      `✅ *Выплата отправлена!*\n\n` +
       `👤 ${result.name}\n` +
       `💰 ${parseFloat(result.amount).toLocaleString('ru-RU')} ₸\n` +
       `📍 Позиция #${result.queuePosition}\n\n` +
-      `📊 Осталось в очереди: ${stats.approvedCount - 1} чел.`,
+      `⏳ Ожидаем подтверждение от получателя (/confirm)\n` +
+      `📊 Осталось в очереди: ${stats.approvedCount} чел.`,
       { parse_mode: 'Markdown' }
     );
 
-    // Notify the paid user
+    // Notify the paid user to confirm receipt
     try {
       await ctx.telegram.sendMessage(
         targetUserId,
-        `🎉 *Выплата получена!*\n\n` +
-        `💰 ${parseFloat(result.amount).toLocaleString('ru-RU')} ₸ выплачено вам.\n\n` +
-        `Спасибо за участие в системе взаимопомощи! 🙏`,
+        `💸 *Администратор отправил вам выплату!*\n\n` +
+        `💰 ${parseFloat(result.amount).toLocaleString('ru-RU')} ₸\n\n` +
+        `Пожалуйста, подтвердите получение командой:\n` +
+        `👉 /confirm`,
         { parse_mode: 'Markdown' }
       );
     } catch {}
@@ -260,7 +262,7 @@ async function handleAdminHelp(ctx) {
     '/queue — полная очередь\n' +
     '/stats — статистика\n' +
     '/balance — публичный счёт\n\n' +
-    '🔄 *Цикл:* pending → approved → paid\n' +
+    '🔄 *Цикл:* pending → approved → awaiting\\_confirm → paid\n' +
     '💡 При новой заявке вы получаете уведомление — просто нажмите ✅ или ❌',
     { parse_mode: 'Markdown' }
   );
