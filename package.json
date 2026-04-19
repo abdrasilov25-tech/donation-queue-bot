@@ -1,0 +1,15 @@
+{
+  "name": "donation-queue-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for mutual donation queue system",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "googleapis": "^144.0.0",
+    "telegraf": "^4.16.3"
+  }
+}
