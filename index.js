@@ -15,6 +15,9 @@ if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required in .env');
 
 const bot = new Telegraf(BOT_TOKEN);
 
+// Diagnostic ping (no Sheets needed)
+bot.command('ping', (ctx) => ctx.reply('🟢 Бот работает! Сервер: Railway'));
+
 // User commands
 bot.start(handleStart);
 bot.command('queue', handleQueue);
