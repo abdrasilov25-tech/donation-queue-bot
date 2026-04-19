@@ -75,6 +75,43 @@ function startScheduler(bot) {
     }
   });
 
+  // Every Monday at 09:00: weekly report to admin
+  cron.schedule('0 9 * * 1', async () => {
+    try {
+      const stats = await getStats();
+
+      // Calculate this week's metrics
+      const { getAllRowsRaw } = require('./sheets');
+      const rows = await getAllRowsRaw();
+      const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const weekRows = rows.slice(1).filter((r) => new Date(r[7]).getTime() > weekAgo);
+      const weekApproved = weekRows.filter((r) => ['approved', 'awaiting_confirm', 'paid'].includes(r[5]));
+      const weekAmount = weekApproved.reduce((s, r) => s + (parseFloat(r[2]) || 0), 0);
+
+      const msg =
+        `📅 *Еженедельный отчёт*\n` +
+        `${'━'.repeat(28)}\n\n` +
+        `*За последние 7 дней:*\n` +
+        `📥 Новых заявок: ${weekRows.length}\n` +
+        `✅ Одобрено: ${weekApproved.length}\n` +
+        `💰 Сумма за неделю: *${weekAmount.toLocaleString('ru-RU')} ₸*\n\n` +
+        `*Всего в системе:*\n` +
+        `💵 Общая сумма: *${stats.totalAllAmount.toLocaleString('ru-RU')} ₸*\n` +
+        `✅ Одобрено: *${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸*\n` +
+        `👥 В очереди: ${stats.approvedCount}\n` +
+        `⏳ Ожидают: ${stats.pendingCount}\n` +
+        `📈 Средняя донация: ${stats.avgAmount.toLocaleString('ru-RU')} ₸\n\n` +
+        (stats.pendingCount > 0 ? `⚠️ *${stats.pendingCount} заявок ждут проверки* → /pending` : `✅ Все заявки обработаны`);
+
+      for (const adminId of getAdminIds()) {
+        await bot.telegram.sendMessage(adminId, msg, { parse_mode: 'Markdown' }).catch(() => {});
+      }
+      console.log('📅 Weekly report sent');
+    } catch (err) {
+      console.error('Weekly report error:', err.message);
+    }
+  });
+
   // Every 15 minutes: clean up stale user sessions
   cron.schedule('*/15 * * * *', () => {
     try {

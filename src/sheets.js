@@ -461,6 +461,67 @@ async function userExists(userId) {
   return found !== null;
 }
 
+// Search users by name (case-insensitive partial match)
+async function searchByName(query) {
+  const rows = await getAllRows();
+  const q = query.toLowerCase();
+  return rows
+    .filter((r) => (r[COL.NAME] || '').toLowerCase().includes(q))
+    .map((r) => ({
+      userId: r[COL.USER_ID],
+      name: r[COL.NAME],
+      amount: r[COL.AMOUNT],
+      paymentMethod: r[COL.PAYMENT_METHOD],
+      status: r[COL.STATUS] || 'pending',
+      queuePosition: r[COL.QUEUE_POSITION] || '—',
+      createdAt: r[COL.CREATED_AT],
+    }));
+}
+
+// Add admin note to a donation row (stored in a 10th column J)
+async function addNote(userId, note) {
+  const found = await findUserRow(userId);
+  if (!found) return false;
+  const sheets = await getClient();
+  await withRetry(() => sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!J${found.rowIndex}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [[note]] },
+  }));
+  return { name: found.data[COL.NAME], status: found.data[COL.STATUS] };
+}
+
+// Pause/resume state stored in Config!D1
+async function getPauseState() {
+  const sheets = await getClient();
+  try {
+    const res = await withRetry(() => sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Config!D1:E1',
+    }));
+    const row = res.data.values?.[0] || [];
+    return { paused: row[0] === '1', reason: row[1] || '' };
+  } catch {
+    return { paused: false, reason: '' };
+  }
+}
+
+async function setPauseState(paused, reason = '') {
+  const sheets = await getClient();
+  try {
+    await withRetry(() => sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Config!D1:E1',
+      valueInputOption: 'RAW',
+      requestBody: { values: [[paused ? '1' : '0', reason]] },
+    }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Returns full row data for a paid user (for repeat donor flow)
 async function getPaidUser(userId) {
   const found = await findUserRow(userId);
@@ -586,6 +647,10 @@ module.exports = {
   getApprovedCount,
   getQueueLimit,
   setQueueLimit,
+  searchByName,
+  addNote,
+  getPauseState,
+  setPauseState,
   editDonationField,
   getAvgPayoutInterval,
   getTopDonors,

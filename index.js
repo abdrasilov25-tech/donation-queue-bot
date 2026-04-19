@@ -25,6 +25,9 @@ const { handleHealth, handleSetLimit } = require('./src/handlers/health');
 const { handleCancel } = require('./src/handlers/cancel');
 const { handleTop } = require('./src/handlers/top');
 const { handleEdit } = require('./src/handlers/edit');
+const { handleSearch } = require('./src/handlers/search');
+const { handleNote } = require('./src/handlers/note');
+const { handlePause, handleResume } = require('./src/handlers/pause');
 const { getSession, STEPS, isRateLimited } = require('./src/state');
 const { startScheduler } = require('./src/scheduler');
 
@@ -54,6 +57,10 @@ bot.command('broadcast', handleBroadcast);
 bot.command('export', handleExport);
 bot.command('health', handleHealth);
 bot.command('setlimit', handleSetLimit);
+bot.command('search', handleSearch);
+bot.command('note', handleNote);
+bot.command('pause', handlePause);
+bot.command('resume', handleResume);
 
 // Admin commands
 bot.command('approve', handleApprove);

@@ -1,6 +1,6 @@
 const { Markup } = require('telegraf');
 const { STEPS, getSession, setStep, setData, clearSession, isRateLimited } = require('../state');
-const { addDonation, reAddDonation, userExists, getPaidUser, getStats, checkDuplicate, checkPhotoDuplicate, isUserBanned, getApprovedCount, getQueueLimit } = require('../sheets');
+const { addDonation, reAddDonation, userExists, getPaidUser, getStats, checkDuplicate, checkPhotoDuplicate, isUserBanned, getApprovedCount, getQueueLimit, getPauseState } = require('../sheets');
 
 function getAdminIds() {
   return (process.env.ADMIN_IDS || '').split(',').map((id) => id.trim()).filter(Boolean);
@@ -14,6 +14,17 @@ async function handleStart(ctx) {
     const banned = await isUserBanned(userId).catch(() => false);
     if (banned) {
       return ctx.reply('🚫 Вы заблокированы и не можете подавать заявки.');
+    }
+
+    // Check if registrations are paused
+    const pauseState = await getPauseState().catch(() => ({ paused: false }));
+    if (pauseState.paused) {
+      return ctx.reply(
+        `⏸ *Приём заявок временно приостановлен*\n\n` +
+        `📝 Причина: ${pauseState.reason || 'технические работы'}\n\n` +
+        `Попробуйте позже или обратитесь к администратору.`,
+        { parse_mode: 'Markdown' }
+      );
     }
 
     // Check queue limit before allowing new registration
