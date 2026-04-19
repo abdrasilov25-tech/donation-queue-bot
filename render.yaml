@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: donation-queue-bot
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: SPREADSHEET_ID
+        sync: false
+      - key: SHEET_NAME
+        sync: false
+      - key: GOOGLE_CREDENTIALS_JSON
+        sync: false

@@ -1,5 +1,6 @@
 require('dotenv').config();
 
+const express = require('express');
 const { Telegraf } = require('telegraf');
 const { ensureHeaderRow } = require('./src/sheets');
 const { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof } = require('./src/handlers/start');
@@ -83,6 +84,13 @@ bot.catch((err, ctx) => {
   } catch {}
 });
 
+// Keep-alive HTTP server for Render.com free tier
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (_, res) => res.send('Bot is running'));
+app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+app.listen(PORT, () => console.log(`✅ HTTP server on port ${PORT}`));
+
 async function main() {
   try {
     await ensureHeaderRow();
@@ -91,7 +99,21 @@ async function main() {
     console.warn('⚠️  Google Sheets error:', err.message);
   }
 
-  await bot.launch();
+  // Retry loop — wins against stale Railway containers
+  while (true) {
+    try {
+      console.log('🚀 Starting bot...');
+      await bot.launch();
+      break;
+    } catch (err) {
+      if (err.response && err.response.error_code === 409) {
+        console.log('⏳ Another instance detected, retrying in 5s...');
+        await new Promise((r) => setTimeout(r, 5000));
+      } else {
+        throw err;
+      }
+    }
+  }
 
   process.once('SIGINT', () => bot.stop('SIGINT'));
   process.once('SIGTERM', () => bot.stop('SIGTERM'));
