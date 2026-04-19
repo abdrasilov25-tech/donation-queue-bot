@@ -493,6 +493,32 @@ async function addNote(userId, note) {
 }
 
 // Pause/resume state stored in Config!D1
+// Live counter message reference stored in Config!F1:G1 (chatId, messageId)
+async function getLiveCounter() {
+  const sheets = await getClient();
+  try {
+    const res = await withRetry(() => sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Config!F1:G1',
+    }));
+    const row = res.data.values?.[0] || [];
+    if (!row[0] || !row[1]) return null;
+    return { chatId: row[0], messageId: parseInt(row[1]) };
+  } catch {
+    return null;
+  }
+}
+
+async function setLiveCounter(chatId, messageId) {
+  const sheets = await getClient();
+  await withRetry(() => sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'Config!F1:G1',
+    valueInputOption: 'RAW',
+    requestBody: { values: [[String(chatId), String(messageId)]] },
+  }));
+}
+
 async function getPauseState() {
   const sheets = await getClient();
   try {
@@ -649,6 +675,8 @@ module.exports = {
   setQueueLimit,
   searchByName,
   addNote,
+  getLiveCounter,
+  setLiveCounter,
   getPauseState,
   setPauseState,
   editDonationField,

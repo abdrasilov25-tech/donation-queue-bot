@@ -1,6 +1,7 @@
 const { Markup } = require('telegraf');
 const { updateStatus, markAsPaid, getUserStatus, getPendingUsers, getStats, banUser, unbanUser, getBannedUsers } = require('../sheets');
 const { notifyQueueMove } = require('../scheduler');
+const { refreshLiveCounter } = require('../livecounter');
 
 function getAdminIds() {
   return (process.env.ADMIN_IDS || '').split(',').map((id) => id.trim()).filter(Boolean);
@@ -66,6 +67,9 @@ async function approveUser(ctx, targetUserId, isInline = false) {
       console.warn('Group broadcast failed:', e.message);
     }
   }
+
+  // Update live counter in group/channel
+  refreshLiveCounter(ctx.telegram).catch(() => {});
 
   // Notify donor
   try {

@@ -28,6 +28,7 @@ const { handleEdit } = require('./src/handlers/edit');
 const { handleSearch } = require('./src/handlers/search');
 const { handleNote } = require('./src/handlers/note');
 const { handlePause, handleResume } = require('./src/handlers/pause');
+const { handleStartCounter, handleStopCounter } = require('./src/handlers/counter');
 const { getSession, STEPS, isRateLimited } = require('./src/state');
 const { startScheduler } = require('./src/scheduler');
 
@@ -61,6 +62,8 @@ bot.command('search', handleSearch);
 bot.command('note', handleNote);
 bot.command('pause', handlePause);
 bot.command('resume', handleResume);
+bot.command('startcounter', handleStartCounter);
+bot.command('stopcounter', handleStopCounter);
 
 // Admin commands
 bot.command('approve', handleApprove);
