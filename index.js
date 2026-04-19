@@ -10,7 +10,7 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   console.error('💥 unhandledRejection:', reason);
 });
-const { ensureHeaderRow } = require('./src/sheets');
+const { ensureHeaderRow, ensureConfigSheet } = require('./src/sheets');
 const { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof } = require('./src/handlers/start');
 const { handleQueue } = require('./src/handlers/queue');
 const { handleStatus } = require('./src/handlers/status');
@@ -152,7 +152,8 @@ app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime
 async function main() {
   try {
     await ensureHeaderRow();
-    console.log('✅ Google Sheets connected');
+    await ensureConfigSheet();
+    console.log('✅ Google Sheets connected (Donations + Config sheets ready)');
   } catch (err) {
     console.warn('⚠️  Google Sheets error:', err.message);
   }

@@ -426,14 +426,31 @@ async function checkPhotoDuplicate(userId, fileUniqueId) {
   return found ? { name: found[COL.NAME], userId: found[COL.USER_ID] } : null;
 }
 
-// Get or set fundraising goal (stored in a named range or separate sheet cell)
+// Ensure Config sheet exists — creates it if missing
+async function ensureConfigSheet() {
+  const sheets = await getClient();
+  const meta = await withRetry(() => sheets.spreadsheets.get({
+    spreadsheetId: SPREADSHEET_ID,
+    fields: 'sheets.properties.title',
+  }));
+  const exists = meta.data.sheets.some((s) => s.properties.title === 'Config');
+  if (!exists) {
+    await withRetry(() => sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: 'Config' } } }] },
+    }));
+    console.log('✅ Config sheet created automatically');
+  }
+}
+
+// Get or set fundraising goal (stored in Config!A1)
 async function getGoal() {
   const sheets = await getClient();
   try {
-    const res = await sheets.spreadsheets.values.get({
+    const res = await withRetry(() => sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Config!A1',
-    });
+    }));
     const val = res.data.values?.[0]?.[0];
     return val ? parseFloat(val) : null;
   } catch {
@@ -444,14 +461,16 @@ async function getGoal() {
 async function setGoal(amount) {
   const sheets = await getClient();
   try {
-    await sheets.spreadsheets.values.update({
+    await ensureConfigSheet();
+    await withRetry(() => sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Config!A1',
       valueInputOption: 'RAW',
       requestBody: { values: [[amount]] },
-    });
+    }));
     return true;
-  } catch {
+  } catch (err) {
+    console.error('setGoal error:', err.message);
     return false;
   }
 }
@@ -511,6 +530,7 @@ async function getLiveCounter() {
 
 async function setLiveCounter(chatId, messageId) {
   const sheets = await getClient();
+  await ensureConfigSheet();
   await withRetry(() => sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: 'Config!F1:G1',
@@ -536,6 +556,7 @@ async function getPauseState() {
 async function setPauseState(paused, reason = '') {
   const sheets = await getClient();
   try {
+    await ensureConfigSheet();
     await withRetry(() => sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Config!D1:E1',
@@ -613,6 +634,7 @@ async function getQueueLimit() {
 async function setQueueLimit(limit) {
   const sheets = await getClient();
   try {
+    await ensureConfigSheet();
     await withRetry(() => sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Config!B1',
@@ -788,6 +810,7 @@ module.exports = {
   getNotifyPref,
   setNotifyPref,
   createBackup,
+  ensureConfigSheet,
   ensureHeaderRow,
   healthCheck,
 };
