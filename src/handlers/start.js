@@ -1,6 +1,6 @@
 const { Markup } = require('telegraf');
 const { STEPS, getSession, setStep, setData, clearSession, isRateLimited } = require('../state');
-const { addDonation, userExists, getStats, checkDuplicate } = require('../sheets');
+const { addDonation, reAddDonation, userExists, getPaidUser, getStats, checkDuplicate, getApprovedCount, getQueueLimit } = require('../sheets');
 
 function getAdminIds() {
   return (process.env.ADMIN_IDS || '').split(',').map((id) => id.trim()).filter(Boolean);
@@ -10,8 +10,41 @@ async function handleStart(ctx) {
   const userId = ctx.from.id;
 
   try {
-    const exists = await userExists(userId);
+    // Check queue limit before allowing new registration
+    const [limit, approvedCount] = await Promise.all([
+      getQueueLimit().catch(() => null),
+      getApprovedCount().catch(() => 0),
+    ]);
+    if (limit && approvedCount >= limit) {
+      return ctx.reply(
+        `⛔ *Очередь заполнена*\n\n` +
+        `Сейчас в очереди *${approvedCount}* из *${limit}* мест.\n\n` +
+        `Попробуйте позже или обратитесь к администратору.`,
+        { parse_mode: 'Markdown' }
+      );
+    }
 
+    // Check if returning donor (was paid before)
+    const paidUser = await getPaidUser(userId).catch(() => null);
+    if (paidUser) {
+      clearSession(userId);
+      setData(userId, 'name', paidUser.name);
+      setData(userId, 'amount', paidUser.amount);
+      setData(userId, 'paymentMethod', paidUser.paymentMethod);
+      setData(userId, 'isRepeat', true);
+      setStep(userId, STEPS.AWAITING_PROOF);
+
+      return ctx.reply(
+        `👋 *С возвращением, ${paidUser.name}!*\n\n` +
+        `Ваши данные:\n` +
+        `💰 ${parseFloat(paidUser.amount).toLocaleString('ru-RU')} ₸\n` +
+        `💳 ${paidUser.paymentMethod}\n\n` +
+        `📸 Отправьте скриншот нового перевода для повторной заявки:`,
+        { parse_mode: 'Markdown' }
+      );
+    }
+
+    const exists = await userExists(userId);
     if (exists) {
       return ctx.reply(
         '✅ Вы уже зарегистрированы!\n\n' +
@@ -19,8 +52,7 @@ async function handleStart(ctx) {
       );
     }
   } catch (err) {
-    console.error('userExists error:', err.message);
-    // Continue even if sheets fails — let user register
+    console.error('handleStart error:', err.message);
   }
 
   clearSession(userId);
@@ -166,7 +198,8 @@ async function submitDonation(ctx, userId, session, proofLink, proofPhotoId) {
       }
     }
 
-    await addDonation({
+    const donationFn = session.data.isRepeat ? reAddDonation : addDonation;
+    await donationFn({
       userId,
       name: session.data.name,
       amount: session.data.amount,

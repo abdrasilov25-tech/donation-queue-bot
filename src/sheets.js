@@ -345,6 +345,83 @@ async function userExists(userId) {
   return found !== null;
 }
 
+// Returns full row data for a paid user (for repeat donor flow)
+async function getPaidUser(userId) {
+  const found = await findUserRow(userId);
+  if (!found || found.data[COL.STATUS] !== 'paid') return null;
+  return {
+    name: found.data[COL.NAME],
+    amount: found.data[COL.AMOUNT],
+    paymentMethod: found.data[COL.PAYMENT_METHOD],
+  };
+}
+
+// Re-add a returning donor as a new pending row
+async function reAddDonation({ userId, name, amount, paymentMethod, proofLink }) {
+  const sheets = await getClient();
+  const createdAt = new Date().toISOString();
+  await withRetry(() => sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!A:I`,
+    valueInputOption: 'RAW',
+    requestBody: {
+      values: [[String(userId), name, amount, paymentMethod, proofLink || '', 'pending', '', createdAt, '']],
+    },
+  }));
+}
+
+// Export all rows as array of arrays (for CSV)
+async function getAllRowsRaw() {
+  const sheets = await getClient();
+  const header = await withRetry(() => sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!A1:I1`,
+  }));
+  const body = await withRetry(() => sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!A2:I`,
+  }));
+  const headerRow = header.data.values?.[0] || ['user_id','name','amount','payment_method','proof_link','status','queue_position','created_at','paid_at'];
+  const rows = body.data.values || [];
+  return [headerRow, ...rows];
+}
+
+// Count of approved (not yet paid) users — for queue limit check
+async function getApprovedCount() {
+  const rows = await getAllRows();
+  return rows.filter((r) => r[COL.STATUS] === 'approved').length;
+}
+
+// Get or set queue limit from Config sheet B1
+async function getQueueLimit() {
+  const sheets = await getClient();
+  try {
+    const res = await withRetry(() => sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Config!B1',
+    }));
+    const val = res.data.values?.[0]?.[0];
+    return val ? parseInt(val) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function setQueueLimit(limit) {
+  const sheets = await getClient();
+  try {
+    await withRetry(() => sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Config!B1',
+      valueInputOption: 'RAW',
+      requestBody: { values: [[limit]] },
+    }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function healthCheck() {
   const sheets = await getClient();
   await withRetry(() => sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID, fields: 'spreadsheetId' }));
@@ -387,6 +464,12 @@ module.exports = {
   setGoal,
   checkDuplicate,
   userExists,
+  getPaidUser,
+  reAddDonation,
+  getAllRowsRaw,
+  getApprovedCount,
+  getQueueLimit,
+  setQueueLimit,
   ensureHeaderRow,
   healthCheck,
 };

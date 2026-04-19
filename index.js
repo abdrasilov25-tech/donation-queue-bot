@@ -20,6 +20,8 @@ const { handleBalance, handleStats, handleSetGoal } = require('./src/handlers/st
 const { handleBroadcast } = require('./src/handlers/broadcast');
 const { handleResubmit } = require('./src/handlers/resubmit');
 const { handleConfirm } = require('./src/handlers/confirm');
+const { handleExport } = require('./src/handlers/export');
+const { handleHealth, handleSetLimit } = require('./src/handlers/health');
 const { getSession, STEPS, isRateLimited } = require('./src/state');
 const { startScheduler } = require('./src/scheduler');
 
@@ -43,6 +45,9 @@ bot.command('setgoal', handleSetGoal);
 bot.command('resubmit', handleResubmit);
 bot.command('confirm', handleConfirm);
 bot.command('broadcast', handleBroadcast);
+bot.command('export', handleExport);
+bot.command('health', handleHealth);
+bot.command('setlimit', handleSetLimit);
 
 // Admin commands
 bot.command('approve', handleApprove);
@@ -62,7 +67,11 @@ bot.command('help', (ctx) => {
     '/list — последние 10 донаций\n' +
     '/resubmit — повторная подача (для отклонённых)\n' +
     '/confirm — подтвердить получение выплаты\n' +
-    '/help — помощь',
+    '/help — помощь\n\n' +
+    '👮 *Для администратора:*\n' +
+    '/health — статус бота и Sheets\n' +
+    '/export — выгрузить CSV\n' +
+    '/setlimit — лимит очереди',
     { parse_mode: 'Markdown' }
   );
 });

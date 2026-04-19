@@ -260,9 +260,13 @@ async function handleAdminHelp(ctx) {
     '/approve <user\\_id> — одобрить вручную\n' +
     '/reject <user\\_id> — отклонить вручную\n' +
     '/paid <user\\_id> — подтвердить выплату\n' +
+    '/broadcast <текст> — рассылка всем\n' +
+    '/export — выгрузить CSV файл\n' +
+    '/health — статус бота и Sheets\n' +
+    '/setlimit <N> — лимит очереди (0 = без лимита)\n' +
+    '/setgoal <сумма> — цель сбора\n' +
     '/queue — полная очередь\n' +
-    '/stats — статистика\n' +
-    '/balance — публичный счёт\n\n' +
+    '/stats — статистика\n\n' +
     '🔄 *Цикл:* pending → approved → awaiting\\_confirm → paid\n' +
     '💡 При новой заявке вы получаете уведомление — просто нажмите ✅ или ❌',
     { parse_mode: 'Markdown' }
