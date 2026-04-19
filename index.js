@@ -11,8 +11,9 @@ process.on('unhandledRejection', (reason) => {
   console.error('💥 unhandledRejection:', reason);
 });
 const { ensureHeaderRow, ensureConfigSheet } = require('./src/sheets');
-const { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof, handleJoinWaitlist } = require('./src/handlers/start');
+const { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof, handleJoinWaitlist, handleStartRegistration } = require('./src/handlers/start');
 const { handleRef } = require('./src/handlers/ref');
+const { handleLang, handleLangCallback } = require('./src/handlers/language');
 const { handleQueue } = require('./src/handlers/queue');
 const { handleStatus } = require('./src/handlers/status');
 const { handleApprove, handleReject, handlePaid, handlePending, handleAdminHelp, handleInlineApprove, handleInlineReject, handleBan, handleUnban } = require('./src/handlers/admin');
@@ -74,6 +75,7 @@ bot.command('faq', handleFaq);
 bot.command('notify', handleNotify);
 bot.command('pay', handlePay);
 bot.command('ref', handleRef);
+bot.command('lang', handleLang);
 
 // Admin commands
 bot.command('approve', handleApprove);
@@ -118,6 +120,12 @@ bot.action('skip_proof', handleSkipProof);
 // Inline keyboard: join waitlist
 bot.action('join_waitlist', handleJoinWaitlist);
 
+// Inline keyboard: onboarding start
+bot.action('start_registration', handleStartRegistration);
+
+// Inline keyboard: language selection
+bot.action(/^lang_(ru|kz)$/, handleLangCallback);
+
 // Inline keyboard: admin one-tap approve/reject from notification
 bot.action(/^adm_approve_/, handleInlineApprove);
 bot.action(/^adm_reject_/, handleInlineReject);
@@ -132,12 +140,14 @@ bot.on('photo', (ctx) => {
   }
 });
 
-// Text message handler for multi-step registration
+// Text message handler — registration steps + main menu buttons
+const MENU_BUTTONS = ['📝 Подать заявку', '📊 Мой статус', '💰 Баланс', '📋 Очередь', '❓ FAQ', '🔗 Моя ссылка'];
 bot.on('text', (ctx) => {
   const userId = ctx.from.id;
   const session = getSession(userId);
+  const text = ctx.message.text?.trim();
   const activeSteps = [STEPS.AWAITING_NAME, STEPS.AWAITING_AMOUNT, STEPS.AWAITING_PROOF];
-  if (activeSteps.includes(session.step)) {
+  if (MENU_BUTTONS.includes(text) || activeSteps.includes(session.step)) {
     return handleMessage(ctx);
   }
 });

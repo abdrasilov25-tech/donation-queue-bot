@@ -1,9 +1,12 @@
 const { Markup } = require('telegraf');
 const { STEPS, getSession, setStep, setData, clearSession, isRateLimited } = require('../state');
 const { userExists, getPaidUser, getStats, checkDuplicate, checkPhotoDuplicate, isUserBanned, getApprovedCount, getQueueLimit, getPauseState } = require('../sheets');
-const { setPending, hasPending, getPending } = require('../pending');
-const { recordReferral, getOrCreateRef } = require('../referral');
+const { setPending, hasPending } = require('../pending');
+const { recordReferral } = require('../referral');
 const { addToWaitlist, isOnWaitlist, getWaitlistPosition } = require('../waitlist');
+const { getLang } = require('../userprefs');
+const { t } = require('../lang');
+const { mainMenu } = require('../menu');
 
 function getAdminIds() {
   return (process.env.ADMIN_IDS || '').split(',').map((id) => id.trim()).filter(Boolean);
@@ -12,56 +15,55 @@ function getAdminIds() {
 async function handleJoinWaitlist(ctx) {
   const userId = ctx.from.id;
   const name = ctx.from.first_name || 'Участник';
+  const lang = getLang(userId);
 
   if (isOnWaitlist(userId)) {
     const pos = getWaitlistPosition(userId);
     await ctx.answerCbQuery();
-    return ctx.reply(`📋 Вы уже в листе ожидания на позиции *#${pos}*. Мы уведомим вас когда откроется место.`, { parse_mode: 'Markdown' });
+    return ctx.reply(t(lang, 'alreadyWaiting', pos), { parse_mode: 'Markdown' });
   }
 
   addToWaitlist(userId, name);
   const pos = getWaitlistPosition(userId);
-  await ctx.answerCbQuery('✅ Добавлены в лист ожидания');
+  await ctx.answerCbQuery('✅');
   await ctx.reply(
-    `📋 *Вы добавлены в лист ожидания!*\n\n` +
-    `Ваша позиция: *#${pos}*\n\n` +
-    `Как только в очереди освободится место — вы получите уведомление.`,
+    `📋 *Вы добавлены в лист ожидания!*\n\nВаша позиция: *#${pos}*\n\nКак только в очереди освободится место — вы получите уведомление.`,
     { parse_mode: 'Markdown' }
   );
 }
 
+// Called when user taps "Начать регистрацию" on the onboarding card
+async function handleStartRegistration(ctx) {
+  const userId = ctx.from.id;
+  const lang = getLang(userId);
+  await ctx.answerCbQuery();
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+  clearSession(userId);
+  setStep(userId, STEPS.AWAITING_NAME);
+  await ctx.reply(t(lang, 'askName'), mainMenu());
+}
+
 async function handleStart(ctx) {
   const userId = ctx.from.id;
+  const lang = getLang(userId);
 
-  // Track referral from start payload (e.g. /start ref_12345_abc)
+  // Track referral from start payload
   const payload = ctx.startPayload;
   if (payload && payload.startsWith('ref_')) {
-    const referrerId = recordReferral(userId, payload);
-    if (referrerId) {
-      // Will notify referrer after registration completes — store for now
-      setData(userId, 'referredBy', referrerId);
-    }
+    recordReferral(userId, payload);
   }
 
   try {
-    // Check ban first
     const banned = await isUserBanned(userId).catch(() => false);
     if (banned) {
-      return ctx.reply('🚫 Вы заблокированы и не можете подавать заявки.');
+      return ctx.reply(t(lang, 'banned'));
     }
 
-    // Check if registrations are paused
     const pauseState = await getPauseState().catch(() => ({ paused: false }));
     if (pauseState.paused) {
-      return ctx.reply(
-        `⏸ *Приём заявок временно приостановлен*\n\n` +
-        `📝 Причина: ${pauseState.reason || 'технические работы'}\n\n` +
-        `Попробуйте позже или обратитесь к администратору.`,
-        { parse_mode: 'Markdown' }
-      );
+      return ctx.reply(t(lang, 'paused', pauseState.reason), { parse_mode: 'Markdown' });
     }
 
-    // Check queue limit before allowing new registration
     const [limit, approvedCount] = await Promise.all([
       getQueueLimit().catch(() => null),
       getApprovedCount().catch(() => 0),
@@ -70,11 +72,9 @@ async function handleStart(ctx) {
       const alreadyWaiting = isOnWaitlist(userId);
       const waitPos = alreadyWaiting ? getWaitlistPosition(userId) : null;
       return ctx.reply(
-        `⛔ *Очередь заполнена*\n\n` +
-        `Сейчас в очереди *${approvedCount}* из *${limit}* мест.\n\n` +
-        (alreadyWaiting
-          ? `📋 Вы уже в листе ожидания: позиция *#${waitPos}*`
-          : `Встаньте в лист ожидания — мы уведомим вас когда освободится место.`),
+        alreadyWaiting
+          ? t(lang, 'alreadyWaiting', waitPos)
+          : t(lang, 'queueFull', approvedCount, limit),
         {
           parse_mode: 'Markdown',
           ...(!alreadyWaiting
@@ -84,7 +84,7 @@ async function handleStart(ctx) {
       );
     }
 
-    // Check if returning donor (was paid before)
+    // Returning donor
     const paidUser = await getPaidUser(userId).catch(() => null);
     if (paidUser) {
       clearSession(userId);
@@ -93,49 +93,38 @@ async function handleStart(ctx) {
       setData(userId, 'paymentMethod', paidUser.paymentMethod);
       setData(userId, 'isRepeat', true);
       setStep(userId, STEPS.AWAITING_PROOF);
-
       return ctx.reply(
         `👋 *С возвращением, ${paidUser.name}!*\n\n` +
-        `Ваши данные:\n` +
-        `💰 ${parseFloat(paidUser.amount).toLocaleString('ru-RU')} ₸\n` +
-        `💳 ${paidUser.paymentMethod}\n\n` +
+        `Ваши данные:\n💰 ${parseFloat(paidUser.amount).toLocaleString('ru-RU')} ₸\n💳 ${paidUser.paymentMethod}\n\n` +
         `📸 Отправьте скриншот нового перевода для повторной заявки:`,
         { parse_mode: 'Markdown' }
       );
     }
 
-    // Check if already submitted (pending in memory)
     if (hasPending(userId)) {
-      return ctx.reply(
-        '⏳ Ваша заявка уже отправлена на проверку.\n\n' +
-        'Используйте:\n/status — ваш статус\n/queue — очередь\n/balance — общий счёт'
-      );
+      return ctx.reply(t(lang, 'alreadyPending'), mainMenu());
     }
 
     const exists = await userExists(userId);
     if (exists) {
-      return ctx.reply(
-        '✅ Вы уже зарегистрированы!\n\n' +
-        'Используйте:\n/status — ваш статус\n/queue — очередь\n/balance — общий счёт'
-      );
+      return ctx.reply(t(lang, 'alreadyRegistered'), mainMenu());
     }
   } catch (err) {
     console.error('handleStart error:', err.message);
   }
 
-  clearSession(userId);
-  setStep(userId, STEPS.AWAITING_NAME);
-
+  // New user — show onboarding card
   const stats = await getStats().catch(() => null);
   const totalLine = stats
     ? `\n💰 Уже собрано: *${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸* (${stats.approvedCount} участников)\n`
     : '';
 
   await ctx.reply(
-    '👋 Добро пожаловать в систему взаимопомощи!\n' +
-    totalLine +
-    '\n📝 Введите ваше имя:',
-    { parse_mode: 'Markdown' }
+    t(lang, 'onboarding', totalLine),
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([[Markup.button.callback(t(lang, 'startBtn'), 'start_registration')]]),
+    }
   );
 }
 
@@ -145,38 +134,40 @@ const MAX_NAME_LEN = 60;
 
 async function handleMessage(ctx) {
   const userId = ctx.from.id;
-
-  if (isRateLimited(userId)) return; // silently drop — too fast
+  if (isRateLimited(userId)) return;
 
   const session = getSession(userId);
   const text = ctx.message.text?.trim();
-
   if (!text) return;
+
+  const lang = getLang(userId);
+
+  // Route main menu button taps — lazy-require to avoid circular deps
+  if (text === '📝 Подать заявку') return handleStart(ctx);
+  if (text === '📊 Мой статус')    return require('./status').handleStatus(ctx);
+  if (text === '💰 Баланс')        return require('./stats').handleBalance(ctx);
+  if (text === '📋 Очередь')       return require('./queue').handleQueue(ctx);
+  if (text === '❓ FAQ')           return require('./faq').handleFaq(ctx);
+  if (text === '🔗 Моя ссылка')   return require('./ref').handleRef(ctx);
 
   switch (session.step) {
     case STEPS.AWAITING_NAME: {
-      if (text.length < 2) return ctx.reply('❌ Имя слишком короткое. Попробуйте снова:');
-      if (text.length > MAX_NAME_LEN) return ctx.reply(`❌ Имя слишком длинное (макс. ${MAX_NAME_LEN} символов):`);
+      if (text.length < 2) return ctx.reply(t(lang, 'nameTooShort'));
+      if (text.length > MAX_NAME_LEN) return ctx.reply(t(lang, 'nameTooLong', MAX_NAME_LEN));
       setData(userId, 'name', text.replace(/[<>]/g, ''));
       setStep(userId, STEPS.AWAITING_AMOUNT);
-      return ctx.reply('💰 Введите сумму донации (только цифры, например: 5000):');
+      return ctx.reply(t(lang, 'askAmount'));
     }
 
     case STEPS.AWAITING_AMOUNT: {
       const amount = parseFloat(text.replace(/[^0-9.]/g, ''));
-      if (isNaN(amount) || amount <= 0) {
-        return ctx.reply('❌ Введите корректную сумму (только цифры). Например: 5000');
-      }
-      if (amount < MIN_AMOUNT) {
-        return ctx.reply(`❌ Минимальная сумма — <b>${MIN_AMOUNT.toLocaleString('ru-RU')} ₸</b>`, { parse_mode: 'HTML' });
-      }
-      if (amount > MAX_AMOUNT) {
-        return ctx.reply(`❌ Максимальная сумма — ${MAX_AMOUNT.toLocaleString('ru-RU')} ₸. Введите корректную сумму:`);
-      }
+      if (isNaN(amount) || amount <= 0) return ctx.reply(t(lang, 'invalidAmount'));
+      if (amount < MIN_AMOUNT) return ctx.reply(t(lang, 'minAmount', MIN_AMOUNT), { parse_mode: 'HTML' });
+      if (amount > MAX_AMOUNT) return ctx.reply(t(lang, 'maxAmount', MAX_AMOUNT));
       setData(userId, 'amount', amount);
       setStep(userId, STEPS.AWAITING_PAYMENT);
       return ctx.reply(
-        '💳 Выберите способ оплаты:',
+        t(lang, 'choosePayment'),
         Markup.inlineKeyboard([
           [Markup.button.callback('📱 Kaspi', 'pay_kaspi')],
           [Markup.button.callback('💳 Банковская карта', 'pay_card')],
@@ -186,9 +177,7 @@ async function handleMessage(ctx) {
     }
 
     case STEPS.AWAITING_PROOF: {
-      if (text.length < 5) {
-        return ctx.reply('❌ Слишком коротко. Отправьте скриншот или ссылку на перевод.');
-      }
+      if (text.length < 5) return ctx.reply('❌ Слишком коротко. Отправьте скриншот или ссылку на перевод.');
       await submitDonation(ctx, userId, session, text, null);
       break;
     }
@@ -198,11 +187,9 @@ async function handleMessage(ctx) {
   }
 }
 
-// Handle photo proof (screenshot of payment)
 async function handlePhotoProof(ctx) {
   const userId = ctx.from.id;
   const session = getSession(userId);
-
   if (session.step !== STEPS.AWAITING_PROOF) return;
 
   const photo = ctx.message.photo;
@@ -210,16 +197,12 @@ async function handlePhotoProof(ctx) {
   const fileId = best.file_id;
   const fileUniqueId = best.file_unique_id;
 
-  // Check if this exact photo was used by another user
   const photoDup = await checkPhotoDuplicate(userId, fileUniqueId).catch(() => null);
   if (photoDup) {
-    const adminIds = getAdminIds();
-    for (const adminId of adminIds) {
+    for (const adminId of getAdminIds()) {
       await ctx.telegram.sendMessage(
         adminId,
-        `🚨 *Одинаковый скриншот!*\n\n` +
-        `Пользователь *${session.data.name}* (ID: \`${userId}\`) прислал тот же скриншот, что и *${photoDup.name}* (ID: \`${photoDup.userId}\`).\n\n` +
-        `Возможное мошенничество — проверьте перед одобрением!`,
+        `🚨 *Одинаковый скриншот!*\n\nПользователь *${session.data.name}* (ID: \`${userId}\`) прислал тот же скриншот, что и *${photoDup.name}* (ID: \`${photoDup.userId}\`).\n\nВозможное мошенничество!`,
         { parse_mode: 'Markdown' }
       ).catch(() => {});
     }
@@ -232,70 +215,40 @@ async function handlePhotoProof(ctx) {
 async function handlePaymentChoice(ctx) {
   const userId = ctx.from.id;
   const session = getSession(userId);
-
   if (session.step !== STEPS.AWAITING_PAYMENT) return ctx.answerCbQuery();
 
-  const paymentMap = {
-    pay_kaspi: 'Kaspi',
-    pay_card: 'Банковская карта',
-    pay_cash: 'Наличные',
-  };
-
+  const paymentMap = { pay_kaspi: 'Kaspi', pay_card: 'Банковская карта', pay_cash: 'Наличные' };
   const method = paymentMap[ctx.callbackQuery.data];
   if (!method) return ctx.answerCbQuery();
 
   setData(userId, 'paymentMethod', method);
   setStep(userId, STEPS.AWAITING_PROOF);
-
   await ctx.answerCbQuery();
   await ctx.editMessageText(`✅ Способ оплаты: ${method}`);
 
-  const amount = session.data.amount;
-  const amountStr = parseFloat(amount).toLocaleString('ru-RU');
-
-  let detailsHtml;
-  if (method === 'Наличные') {
-    detailsHtml =
-      `💵 <b>Наличные</b>\n\n` +
-      `Свяжитесь с администратором для передачи наличных.\n` +
-      `Сумма: <b>${amountStr} ₸</b>`;
-  } else {
-    detailsHtml =
-      `📱 <b>Kaspi</b>\n` +
-      `Номер: <code>87712472645</code>\n` +
-      `Получатель: <b>Назипа А.</b>\n\n` +
-      `Сумма к переводу: <b>${amountStr} ₸</b>\n\n` +
-      `⚠️ В комментарии к переводу укажите своё имя.`;
-  }
+  const amountStr = parseFloat(session.data.amount).toLocaleString('ru-RU');
+  const detailsHtml = method === 'Наличные'
+    ? `💵 <b>Наличные</b>\n\nСвяжитесь с администратором для передачи наличных.\nСумма: <b>${amountStr} ₸</b>`
+    : `📱 <b>Kaspi</b>\nНомер: <code>87712472645</code>\nПолучатель: <b>Назипа А.</b>\n\nСумма к переводу: <b>${amountStr} ₸</b>\n\n⚠️ В комментарии укажите своё имя.`;
 
   await ctx.reply(
-    `💳 <b>Реквизиты для перевода:</b>\n` +
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-    detailsHtml +
-    `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-    `📸 После перевода отправьте скриншот сюда:`,
+    `💳 <b>Реквизиты для перевода:</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n${detailsHtml}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📸 После перевода отправьте скриншот сюда:`,
     { parse_mode: 'HTML' }
   );
 }
 
 async function handleSkipProof(ctx) {
-  // Proof is now mandatory — skip is no longer allowed
   await ctx.answerCbQuery('❌ Доказательство обязательно', { show_alert: true });
 }
 
 async function submitDonation(ctx, userId, session, proofLink, proofPhotoId, fileUniqueId = null) {
   try {
-    // Duplicate detection: same amount + method from different user in last 24h
     const duplicate = await checkDuplicate(userId, session.data.amount, session.data.paymentMethod).catch(() => null);
     if (duplicate) {
-      const adminIds = (process.env.ADMIN_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
-      for (const adminId of adminIds) {
+      for (const adminId of getAdminIds()) {
         await ctx.telegram.sendMessage(
           adminId,
-          `⚠️ *Возможный дубль!*\n\n` +
-          `Новая заявка от *${session.data.name}* (ID: \`${userId}\`) на *${parseFloat(session.data.amount).toLocaleString('ru-RU')} ₸* (${session.data.paymentMethod})\n` +
-          `совпадает с заявкой от *${duplicate.name}* за последние 24ч.\n\n` +
-          `Проверьте внимательно перед одобрением!`,
+          `⚠️ *Возможный дубль!*\n\nНовая заявка от *${session.data.name}* (ID: \`${userId}\`) на *${parseFloat(session.data.amount).toLocaleString('ru-RU')} ₸* (${session.data.paymentMethod})\nсовпадает с заявкой от *${duplicate.name}* за последние 24ч.\n\nПроверьте перед одобрением!`,
           { parse_mode: 'Markdown' }
         ).catch(() => {});
       }
@@ -304,6 +257,7 @@ async function submitDonation(ctx, userId, session, proofLink, proofPhotoId, fil
     const proofValue = proofPhotoId
       ? `[фото:${proofPhotoId}${fileUniqueId ? '|' + fileUniqueId : ''}]`
       : proofLink;
+
     setPending(userId, {
       name: session.data.name,
       amount: session.data.amount,
@@ -314,10 +268,9 @@ async function submitDonation(ctx, userId, session, proofLink, proofPhotoId, fil
 
     setStep(userId, STEPS.DONE);
 
-    // Show user confirmation with current total
     const stats = await getStats().catch(() => null);
     const totalLine = stats
-      ? `\n📊 Общий счёт системы: *${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸* (${stats.approvedCount} одобрено)\n`
+      ? `\n📊 Общий счёт: *${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸* (${stats.approvedCount} одобрено)\n`
       : '';
 
     await ctx.reply(
@@ -329,10 +282,9 @@ async function submitDonation(ctx, userId, session, proofLink, proofPhotoId, fil
       '⏳ Статус: *ожидает проверки*\n' +
       totalLine +
       '\nВы получите уведомление после проверки.',
-      { parse_mode: 'Markdown' }
+      { parse_mode: 'Markdown', ...mainMenu() }
     );
 
-    // Notify admin with inline approve/reject buttons
     await notifyAdmins(ctx, userId, session, proofLink, proofPhotoId, fileUniqueId);
   } catch (err) {
     console.error('Submit error:', err);
@@ -353,25 +305,15 @@ async function notifyAdmins(ctx, userId, session, proofLink, proofPhotoId, fileU
     (proofLink ? `🔗 ${proofLink}` : proofPhotoId ? '📸 Скриншот ниже' : '⚠️ Без доказательства');
 
   const keyboard = Markup.inlineKeyboard([
-    [
-      Markup.button.callback('✅ Одобрить', `adm_approve_${userId}`),
-      Markup.button.callback('❌ Отклонить', `adm_reject_${userId}`),
-    ],
+    [Markup.button.callback('✅ Одобрить', `adm_approve_${userId}`), Markup.button.callback('❌ Отклонить', `adm_reject_${userId}`)],
   ]);
 
   for (const adminId of adminIds) {
     try {
       if (proofPhotoId) {
-        await ctx.telegram.sendPhoto(adminId, proofPhotoId, {
-          caption,
-          parse_mode: 'Markdown',
-          ...keyboard,
-        });
+        await ctx.telegram.sendPhoto(adminId, proofPhotoId, { caption, parse_mode: 'Markdown', ...keyboard });
       } else {
-        await ctx.telegram.sendMessage(adminId, caption, {
-          parse_mode: 'Markdown',
-          ...keyboard,
-        });
+        await ctx.telegram.sendMessage(adminId, caption, { parse_mode: 'Markdown', ...keyboard });
       }
     } catch (e) {
       console.warn(`Could not notify admin ${adminId}:`, e.message);
@@ -379,4 +321,12 @@ async function notifyAdmins(ctx, userId, session, proofLink, proofPhotoId, fileU
   }
 }
 
-module.exports = { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof, handleJoinWaitlist };
+module.exports = {
+  handleStart,
+  handleMessage,
+  handlePhotoProof,
+  handlePaymentChoice,
+  handleSkipProof,
+  handleJoinWaitlist,
+  handleStartRegistration,
+};
