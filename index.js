@@ -6,10 +6,11 @@ const { ensureHeaderRow } = require('./src/sheets');
 const { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof } = require('./src/handlers/start');
 const { handleQueue } = require('./src/handlers/queue');
 const { handleStatus } = require('./src/handlers/status');
-const { handleApprove, handleReject, handlePending, handleAdminHelp, handleInlineApprove, handleInlineReject } = require('./src/handlers/admin');
+const { handleApprove, handleReject, handlePaid, handlePending, handleAdminHelp, handleInlineApprove, handleInlineReject } = require('./src/handlers/admin');
 const { handleList } = require('./src/handlers/list');
 const { handleBalance, handleStats } = require('./src/handlers/stats');
 const { getSession, STEPS } = require('./src/state');
+const { startScheduler } = require('./src/scheduler');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required in .env');
@@ -31,6 +32,7 @@ bot.command('счет', handleBalance);
 // Admin commands
 bot.command('approve', handleApprove);
 bot.command('reject', handleReject);
+bot.command('paid', handlePaid);
 bot.command('pending', handlePending);
 bot.command('admin', handleAdminHelp);
 
@@ -99,7 +101,9 @@ async function main() {
     console.warn('⚠️  Google Sheets error:', err.message);
   }
 
-  // Retry loop — wins against stale Railway containers
+  startScheduler(bot);
+
+  // Retry loop — wins against stale containers
   while (true) {
     try {
       console.log('🚀 Starting bot...');

@@ -11,9 +11,10 @@ const COL = {
   AMOUNT: 2,
   PAYMENT_METHOD: 3,
   PROOF_LINK: 4,
-  STATUS: 5,
+  STATUS: 5,        // pending / approved / rejected / paid
   QUEUE_POSITION: 6,
   CREATED_AT: 7,
+  PAID_AT: 8,       // timestamp when marked paid
 };
 
 let sheetsClient = null;
@@ -175,6 +176,80 @@ async function getPendingUsers() {
     }));
 }
 
+// Mark donation as paid — full cycle: pending→approved→paid
+async function markAsPaid(userId) {
+  const found = await findUserRow(userId);
+  if (!found) return false;
+
+  const sheets = await getClient();
+  const paidAt = new Date().toISOString();
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!F${found.rowIndex}:I${found.rowIndex}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [['paid', found.data[COL.QUEUE_POSITION], '', paidAt]] },
+  });
+
+  return {
+    name: found.data[COL.NAME],
+    amount: found.data[COL.AMOUNT],
+    queuePosition: found.data[COL.QUEUE_POSITION],
+  };
+}
+
+// Get pending submissions older than X hours (for admin reminder)
+async function getPendingOlderThan(hours = 24) {
+  const rows = await getAllRows();
+  const cutoff = Date.now() - hours * 60 * 60 * 1000;
+  return rows
+    .filter((r) => {
+      if (r[COL.STATUS] !== 'pending') return false;
+      const created = new Date(r[COL.CREATED_AT]).getTime();
+      return created < cutoff;
+    })
+    .map((r) => ({
+      userId: r[COL.USER_ID],
+      name: r[COL.NAME],
+      amount: r[COL.AMOUNT],
+      paymentMethod: r[COL.PAYMENT_METHOD],
+      proofLink: r[COL.PROOF_LINK],
+      createdAt: r[COL.CREATED_AT],
+    }));
+}
+
+// Get all approved (not yet paid) users for position notifications
+async function getApprovedActiveUsers() {
+  const rows = await getAllRows();
+  return rows
+    .filter((r) => r[COL.STATUS] === 'approved')
+    .sort((a, b) => parseInt(a[COL.QUEUE_POSITION]) - parseInt(b[COL.QUEUE_POSITION]))
+    .map((r, i) => ({
+      userId: r[COL.USER_ID],
+      name: r[COL.NAME],
+      amount: r[COL.AMOUNT],
+      queuePosition: r[COL.QUEUE_POSITION],
+      effectivePosition: i + 1, // real position after paid members removed
+    }));
+}
+
+// Check for suspicious duplicate: same amount + payment method from different user recently
+async function checkDuplicate(userId, amount, paymentMethod) {
+  const rows = await getAllRows();
+  const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
+
+  const suspicious = rows.filter((r) => {
+    if (r[COL.USER_ID] === String(userId)) return false; // same user handled elsewhere
+    if (r[COL.STATUS] === 'rejected') return false;
+    const sameAmount = parseFloat(r[COL.AMOUNT]) === parseFloat(amount);
+    const sameMethod = r[COL.PAYMENT_METHOD] === paymentMethod;
+    const recent = new Date(r[COL.CREATED_AT]).getTime() > recentCutoff;
+    return sameAmount && sameMethod && recent;
+  });
+
+  return suspicious.length > 0 ? suspicious[0] : null;
+}
+
 async function userExists(userId) {
   const found = await findUserRow(userId);
   return found !== null;
@@ -201,11 +276,15 @@ async function ensureHeaderRow() {
 module.exports = {
   addDonation,
   updateStatus,
+  markAsPaid,
   getUserStatus,
   getApprovedQueue,
   getLastApproved,
   getStats,
   getPendingUsers,
+  getPendingOlderThan,
+  getApprovedActiveUsers,
+  checkDuplicate,
   userExists,
   ensureHeaderRow,
 };

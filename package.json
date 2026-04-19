@@ -11,6 +11,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.22.1",
     "googleapis": "^144.0.0",
+    "node-cron": "^4.2.1",
     "telegraf": "^4.16.3"
   }
 }

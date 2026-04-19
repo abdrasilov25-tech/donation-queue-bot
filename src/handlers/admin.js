@@ -1,5 +1,6 @@
 const { Markup } = require('telegraf');
-const { updateStatus, getUserStatus, getPendingUsers, getStats } = require('../sheets');
+const { updateStatus, markAsPaid, getUserStatus, getPendingUsers, getStats } = require('../sheets');
+const { notifyQueueMove } = require('../scheduler');
 
 function getAdminIds() {
   return (process.env.ADMIN_IDS || '').split(',').map((id) => id.trim()).filter(Boolean);
@@ -161,6 +162,56 @@ async function handleReject(ctx) {
   }
 }
 
+async function handlePaid(ctx) {
+  if (!requireAdmin(ctx)) return;
+  const args = ctx.message.text.split(' ');
+  if (args.length < 2) {
+    return ctx.reply(
+      '❌ Использование: /paid <user_id>\n\n' +
+      'Отмечает донацию как выплаченную и уведомляет очередь.'
+    );
+  }
+
+  const targetUserId = args[1].trim();
+  try {
+    const userInfo = await getUserStatus(targetUserId);
+    if (!userInfo) return ctx.reply(`❌ Пользователь ${targetUserId} не найден.`);
+    if (userInfo.status !== 'approved') {
+      return ctx.reply(`⚠️ Статус ${userInfo.name}: *${userInfo.status}*. Выплата возможна только для одобренных.`, { parse_mode: 'Markdown' });
+    }
+
+    const result = await markAsPaid(targetUserId);
+    const stats = await getStats();
+
+    await ctx.reply(
+      `✅ *Выплата подтверждена!*\n\n` +
+      `👤 ${result.name}\n` +
+      `💰 ${parseFloat(result.amount).toLocaleString('ru-RU')} ₸\n` +
+      `📍 Позиция #${result.queuePosition}\n\n` +
+      `📊 Осталось в очереди: ${stats.approvedCount - 1} чел.`,
+      { parse_mode: 'Markdown' }
+    );
+
+    // Notify the paid user
+    try {
+      await ctx.telegram.sendMessage(
+        targetUserId,
+        `🎉 *Выплата получена!*\n\n` +
+        `💰 ${parseFloat(result.amount).toLocaleString('ru-RU')} ₸ выплачено вам.\n\n` +
+        `Спасибо за участие в системе взаимопомощи! 🙏`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch {}
+
+    // Notify others in queue that it moved
+    await notifyQueueMove(ctx.telegram ? { telegram: ctx.telegram } : ctx, result.name, result.queuePosition);
+
+  } catch (err) {
+    console.error('Paid error:', err);
+    await ctx.reply('❌ Ошибка при обновлении статуса.');
+  }
+}
+
 async function handlePending(ctx) {
   if (!requireAdmin(ctx)) return;
   try {
@@ -202,15 +253,17 @@ async function handleAdminHelp(ctx) {
   if (!requireAdmin(ctx)) return;
   await ctx.reply(
     '🔧 *Команды администратора:*\n\n' +
-    '/pending — список ожидающих (с кнопками одобрить/отклонить)\n' +
+    '/pending — список ожидающих (с кнопками ✅/❌)\n' +
     '/approve <user\\_id> — одобрить вручную\n' +
     '/reject <user\\_id> — отклонить вручную\n' +
+    '/paid <user\\_id> — подтвердить выплату\n' +
     '/queue — полная очередь\n' +
     '/stats — статистика\n' +
     '/balance — публичный счёт\n\n' +
-    '💡 При новой заявке вы получаете уведомление с кнопками — просто нажмите ✅ или ❌',
+    '🔄 *Цикл:* pending → approved → paid\n' +
+    '💡 При новой заявке вы получаете уведомление — просто нажмите ✅ или ❌',
     { parse_mode: 'Markdown' }
   );
 }
 
-module.exports = { handleApprove, handleReject, handlePending, handleAdminHelp, handleInlineApprove, handleInlineReject, isAdmin };
+module.exports = { handleApprove, handleReject, handlePaid, handlePending, handleAdminHelp, handleInlineApprove, handleInlineReject, isAdmin };

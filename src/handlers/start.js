@@ -1,6 +1,6 @@
 const { Markup } = require('telegraf');
 const { STEPS, getSession, setStep, setData, clearSession } = require('../state');
-const { addDonation, userExists, getStats } = require('../sheets');
+const { addDonation, userExists, getStats, checkDuplicate } = require('../sheets');
 
 function getAdminIds() {
   return (process.env.ADMIN_IDS || '').split(',').map((id) => id.trim()).filter(Boolean);
@@ -143,6 +143,22 @@ async function handleSkipProof(ctx) {
 
 async function submitDonation(ctx, userId, session, proofLink, proofPhotoId) {
   try {
+    // Duplicate detection: same amount + method from different user in last 24h
+    const duplicate = await checkDuplicate(userId, session.data.amount, session.data.paymentMethod).catch(() => null);
+    if (duplicate) {
+      const adminIds = (process.env.ADMIN_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+      for (const adminId of adminIds) {
+        await ctx.telegram.sendMessage(
+          adminId,
+          `⚠️ *Возможный дубль!*\n\n` +
+          `Новая заявка от *${session.data.name}* (ID: \`${userId}\`) на *${parseFloat(session.data.amount).toLocaleString('ru-RU')} ₸* (${session.data.paymentMethod})\n` +
+          `совпадает с заявкой от *${duplicate.name}* за последние 24ч.\n\n` +
+          `Проверьте внимательно перед одобрением!`,
+          { parse_mode: 'Markdown' }
+        ).catch(() => {});
+      }
+    }
+
     await addDonation({
       userId,
       name: session.data.name,
