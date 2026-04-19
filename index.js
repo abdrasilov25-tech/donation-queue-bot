@@ -8,7 +8,9 @@ const { handleQueue } = require('./src/handlers/queue');
 const { handleStatus } = require('./src/handlers/status');
 const { handleApprove, handleReject, handlePaid, handlePending, handleAdminHelp, handleInlineApprove, handleInlineReject } = require('./src/handlers/admin');
 const { handleList } = require('./src/handlers/list');
-const { handleBalance, handleStats } = require('./src/handlers/stats');
+const { handleBalance, handleStats, handleSetGoal } = require('./src/handlers/stats');
+const { handleBroadcast } = require('./src/handlers/broadcast');
+const { handleResubmit } = require('./src/handlers/resubmit');
 const { getSession, STEPS } = require('./src/state');
 const { startScheduler } = require('./src/scheduler');
 
@@ -28,6 +30,9 @@ bot.command('list', handleList);
 bot.command('balance', handleBalance);
 bot.command('stats', handleStats);
 bot.command('счет', handleBalance);
+bot.command('setgoal', handleSetGoal);
+bot.command('resubmit', handleResubmit);
+bot.command('broadcast', handleBroadcast);
 
 // Admin commands
 bot.command('approve', handleApprove);
@@ -42,9 +47,10 @@ bot.command('help', (ctx) => {
     '/start — подать заявку\n' +
     '/status — мой статус и позиция\n' +
     '/queue — текущая очередь\n' +
-    '/balance — публичный счёт (виден всем)\n' +
+    '/balance — публичный счёт с прогресс-баром\n' +
     '/stats — статистика системы\n' +
     '/list — последние 10 донаций\n' +
+    '/resubmit — повторная подача (для отклонённых)\n' +
     '/help — помощь',
     { parse_mode: 'Markdown' }
   );

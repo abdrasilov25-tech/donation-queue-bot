@@ -250,6 +250,58 @@ async function checkDuplicate(userId, amount, paymentMethod) {
   return suspicious.length > 0 ? suspicious[0] : null;
 }
 
+// Get all users for broadcast (all statuses except rejected)
+async function getAllUsersForBroadcast() {
+  const rows = await getAllRows();
+  return rows
+    .filter((r) => r[COL.STATUS] !== 'rejected')
+    .map((r) => ({ userId: r[COL.USER_ID], name: r[COL.NAME] }));
+}
+
+// Reset rejected user back to pending for resubmission
+async function resetToResubmit(userId) {
+  const found = await findUserRow(userId);
+  if (!found) return false;
+  const sheets = await getClient();
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!F${found.rowIndex}:G${found.rowIndex}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [['pending', '']] },
+  });
+  return true;
+}
+
+// Get or set fundraising goal (stored in a named range or separate sheet cell)
+async function getGoal() {
+  const sheets = await getClient();
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Config!A1',
+    });
+    const val = res.data.values?.[0]?.[0];
+    return val ? parseFloat(val) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function setGoal(amount) {
+  const sheets = await getClient();
+  try {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Config!A1',
+      valueInputOption: 'RAW',
+      requestBody: { values: [[amount]] },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function userExists(userId) {
   const found = await findUserRow(userId);
   return found !== null;
@@ -284,6 +336,10 @@ module.exports = {
   getPendingUsers,
   getPendingOlderThan,
   getApprovedActiveUsers,
+  getAllUsersForBroadcast,
+  resetToResubmit,
+  getGoal,
+  setGoal,
   checkDuplicate,
   userExists,
   ensureHeaderRow,
