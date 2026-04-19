@@ -179,6 +179,55 @@ async function getStats() {
   };
 }
 
+// Edit pending donation field (amount or paymentMethod)
+async function editDonationField(userId, field, value) {
+  const found = await findUserRow(userId);
+  if (!found) return false;
+  if (found.data[COL.STATUS] !== 'pending') return { notPending: true };
+
+  const sheets = await getClient();
+  const colMap = { amount: COL.AMOUNT, paymentMethod: COL.PAYMENT_METHOD };
+  const colIndex = colMap[field];
+  if (colIndex === undefined) return false;
+
+  const colLetter = String.fromCharCode(65 + colIndex); // A=65
+  await withRetry(() => sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!${colLetter}${found.rowIndex}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [[value]] },
+  }));
+  return { success: true, name: found.data[COL.NAME] };
+}
+
+// Calculate average days between paid donations for ETA estimate
+async function getAvgPayoutInterval() {
+  const rows = await getAllRows();
+  const paidDates = rows
+    .filter((r) => r[COL.STATUS] === 'paid' && r[COL.PAID_AT])
+    .map((r) => new Date(r[COL.PAID_AT]).getTime())
+    .filter((t) => !isNaN(t))
+    .sort((a, b) => a - b);
+
+  if (paidDates.length < 2) return null;
+  const gaps = [];
+  for (let i = 1; i < paidDates.length; i++) {
+    gaps.push(paidDates[i] - paidDates[i - 1]);
+  }
+  const avgMs = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+  return Math.round(avgMs / (1000 * 60 * 60 * 24)); // days
+}
+
+// Top donors by amount
+async function getTopDonors(limit = 10) {
+  const rows = await getAllRows();
+  return rows
+    .filter((r) => ['approved', 'awaiting_confirm', 'paid'].includes(r[COL.STATUS]))
+    .map((r) => ({ name: r[COL.NAME], amount: parseFloat(r[COL.AMOUNT]) || 0, status: r[COL.STATUS] }))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, limit);
+}
+
 async function getPendingUsers() {
   const rows = await getAllRows();
   return rows
@@ -537,6 +586,9 @@ module.exports = {
   getApprovedCount,
   getQueueLimit,
   setQueueLimit,
+  editDonationField,
+  getAvgPayoutInterval,
+  getTopDonors,
   getBannedUsers,
   banUser,
   unbanUser,

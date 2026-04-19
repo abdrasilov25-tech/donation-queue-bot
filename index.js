@@ -22,6 +22,9 @@ const { handleResubmit } = require('./src/handlers/resubmit');
 const { handleConfirm } = require('./src/handlers/confirm');
 const { handleExport } = require('./src/handlers/export');
 const { handleHealth, handleSetLimit } = require('./src/handlers/health');
+const { handleCancel } = require('./src/handlers/cancel');
+const { handleTop } = require('./src/handlers/top');
+const { handleEdit } = require('./src/handlers/edit');
 const { getSession, STEPS, isRateLimited } = require('./src/state');
 const { startScheduler } = require('./src/scheduler');
 
@@ -44,6 +47,9 @@ bot.command('счет', handleBalance);
 bot.command('setgoal', handleSetGoal);
 bot.command('resubmit', handleResubmit);
 bot.command('confirm', handleConfirm);
+bot.command('cancel', handleCancel);
+bot.command('top', handleTop);
+bot.command('edit', handleEdit);
 bot.command('broadcast', handleBroadcast);
 bot.command('export', handleExport);
 bot.command('health', handleHealth);
@@ -64,16 +70,16 @@ bot.command('help', (ctx) => {
     '/start — подать заявку\n' +
     '/status — мой статус и позиция\n' +
     '/queue — текущая очередь\n' +
+    '/top — топ-10 доноров\n' +
     '/balance — публичный счёт с прогресс-баром\n' +
     '/stats — статистика системы\n' +
     '/list — последние 10 донаций\n' +
+    '/edit amount 5000 — изменить сумму (пока pending)\n' +
+    '/edit method Kaspi — изменить способ оплаты\n' +
+    '/cancel — отменить текущую регистрацию\n' +
     '/resubmit — повторная подача (для отклонённых)\n' +
     '/confirm — подтвердить получение выплаты\n' +
-    '/help — помощь\n\n' +
-    '👮 *Для администратора:*\n' +
-    '/health — статус бота и Sheets\n' +
-    '/export — выгрузить CSV\n' +
-    '/setlimit — лимит очереди',
+    '/help — помощь',
     { parse_mode: 'Markdown' }
   );
 });
