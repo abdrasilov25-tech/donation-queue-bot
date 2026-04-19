@@ -11,7 +11,7 @@ process.on('unhandledRejection', (reason) => {
   console.error('💥 unhandledRejection:', reason);
 });
 const { ensureHeaderRow, ensureConfigSheet } = require('./src/sheets');
-const { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof, handleJoinWaitlist, handleStartRegistration } = require('./src/handlers/start');
+const { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof, handleJoinWaitlist, handleStartRegistration, handleContactShare } = require('./src/handlers/start');
 const { handleRef } = require('./src/handlers/ref');
 const { handleLang, handleLangCallback } = require('./src/handlers/language');
 const { handleQueue } = require('./src/handlers/queue');
@@ -129,6 +129,15 @@ bot.action(/^lang_(ru|kz)$/, handleLangCallback);
 // Inline keyboard: admin one-tap approve/reject from notification
 bot.action(/^adm_approve_/, handleInlineApprove);
 bot.action(/^adm_reject_/, handleInlineReject);
+
+// Contact share handler (phone verification)
+bot.on('contact', (ctx) => {
+  const userId = ctx.from.id;
+  const session = getSession(userId);
+  if (session.step === STEPS.AWAITING_PHONE) {
+    return handleContactShare(ctx);
+  }
+});
 
 // Photo proof handler (user sends screenshot)
 bot.on('photo', (ctx) => {

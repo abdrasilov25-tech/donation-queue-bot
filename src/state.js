@@ -3,6 +3,7 @@ const rateLimitMap = new Map(); // userId -> last message timestamp
 
 const STEPS = {
   IDLE: 'idle',
+  AWAITING_PHONE: 'awaiting_phone',
   AWAITING_NAME: 'awaiting_name',
   AWAITING_AMOUNT: 'awaiting_amount',
   AWAITING_PAYMENT: 'awaiting_payment',
@@ -51,7 +52,7 @@ function cleanupStaleSessions() {
   let cleaned = 0;
 
   for (const [userId, session] of sessions) {
-    const activeSteps = [STEPS.AWAITING_NAME, STEPS.AWAITING_AMOUNT, STEPS.AWAITING_PAYMENT, STEPS.AWAITING_PROOF];
+    const activeSteps = [STEPS.AWAITING_PHONE, STEPS.AWAITING_NAME, STEPS.AWAITING_AMOUNT, STEPS.AWAITING_PAYMENT, STEPS.AWAITING_PROOF];
     if (activeSteps.includes(session.step) && now - session.updatedAt > SESSION_TTL_MS) {
       clearSession(userId);
       cleaned++;

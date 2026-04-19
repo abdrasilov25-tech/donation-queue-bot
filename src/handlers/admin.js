@@ -2,6 +2,7 @@ const { Markup } = require('telegraf');
 const { markAsPaid, getUserStatus, getStats, banUser, unbanUser, getBannedUsers, addApprovedDonation } = require('../sheets');
 const { getPending, deletePending, getAllPending } = require('../pending');
 const { shiftWaitlist, getWaitlist } = require('../waitlist');
+const { setRejected, clearRejection } = require('../phonestore');
 const { notifyQueueMove } = require('../scheduler');
 const { refreshLiveCounter } = require('../livecounter');
 
@@ -43,6 +44,7 @@ async function approveUser(ctx, targetUserId, isInline = false) {
     proofLink: pending.proofLink,
   });
   deletePending(targetUserId);
+  clearRejection(targetUserId); // clear any existing cooldown on approval
 
   const userInfo = { name: pending.name, amount: pending.amount };
   const result = { queuePosition };
@@ -117,6 +119,7 @@ async function rejectUser(ctx, targetUserId, isInline = false, reason = '') {
   }
 
   deletePending(targetUserId);
+  setRejected(targetUserId); // start 24h cooldown
 
   const userInfo = { name: pending.name, amount: pending.amount };
   const reasonLine = reason ? `\n📝 Причина: ${reason}` : '';

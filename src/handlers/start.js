@@ -7,6 +7,7 @@ const { addToWaitlist, isOnWaitlist, getWaitlistPosition } = require('../waitlis
 const { getLang } = require('../userprefs');
 const { t } = require('../lang');
 const { mainMenu } = require('../menu');
+const { storePhone, hasPhone, findDuplicatePhone, getRejectionCooldownLeft } = require('../phonestore');
 
 function getAdminIds() {
   return (process.env.ADMIN_IDS || '').split(',').map((id) => id.trim()).filter(Boolean);
@@ -29,6 +30,63 @@ async function handleJoinWaitlist(ctx) {
   await ctx.reply(
     `📋 *Вы добавлены в лист ожидания!*\n\nВаша позиция: *#${pos}*\n\nКак только в очереди освободится место — вы получите уведомление.`,
     { parse_mode: 'Markdown' }
+  );
+}
+
+// Called when user shares phone number
+async function handleContactShare(ctx) {
+  const userId = ctx.from.id;
+  const session = getSession(userId);
+  if (session.step !== STEPS.AWAITING_PHONE) return;
+
+  const contact = ctx.message.contact;
+  // Ensure user is sharing their own number, not someone else's
+  if (String(contact.user_id) !== String(userId)) {
+    return ctx.reply('❌ Пожалуйста, поделитесь своим собственным номером телефона.', {
+      ...Markup.keyboard([[Markup.button.contactRequest('📱 Поделиться номером')]]).resize().oneTime(),
+    });
+  }
+
+  const phone = contact.phone_number;
+  const duplicate = findDuplicatePhone(userId, phone);
+
+  if (duplicate) {
+    // Alert admin about possible multi-account
+    for (const adminId of getAdminIds()) {
+      await ctx.telegram.sendMessage(
+        adminId,
+        `🚨 *Дублирующий номер телефона!*\n\n` +
+        `Пользователь ID: \`${userId}\` (${ctx.from.first_name}) пытается зарегистрироваться с номером уже зарегистрированного ID: \`${duplicate}\`.\n\n` +
+        `Возможный мультиаккаунт — проверьте!`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => {});
+    }
+    return ctx.reply(
+      `⚠️ *Этот номер телефона уже использован*\n\nОбратитесь к администратору если это ошибка.`,
+      { parse_mode: 'Markdown', ...Markup.removeKeyboard() }
+    );
+  }
+
+  storePhone(userId, phone);
+
+  // Proceed to onboarding
+  clearSession(userId);
+  const lang = getLang(userId);
+  const stats = await getStats().catch(() => null);
+  const totalLine = stats
+    ? `\n💰 Уже собрано: *${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸* (${stats.approvedCount} участников)\n`
+    : '';
+
+  await ctx.reply(
+    `✅ *Номер подтверждён!*`,
+    { parse_mode: 'Markdown', ...Markup.removeKeyboard() }
+  );
+  await ctx.reply(
+    t(lang, 'onboarding', totalLine),
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([[Markup.button.callback(t(lang, 'startBtn'), 'start_registration')]]),
+    }
   );
 }
 
@@ -109,8 +167,31 @@ async function handleStart(ctx) {
     if (exists) {
       return ctx.reply(t(lang, 'alreadyRegistered'), mainMenu());
     }
+
+    // Rejection cooldown check
+    const cooldownLeft = getRejectionCooldownLeft(userId);
+    if (cooldownLeft > 0) {
+      const hours = Math.ceil(cooldownLeft / 3600000);
+      return ctx.reply(
+        `⏳ *Повторная подача временно недоступна*\n\nВаша заявка была отклонена. Попробуйте через *${hours} ч*.\n\nЕсли считаете это ошибкой — обратитесь к администратору.`,
+        { parse_mode: 'Markdown' }
+      );
+    }
   } catch (err) {
     console.error('handleStart error:', err.message);
+  }
+
+  // Phone not yet verified — ask first
+  if (!hasPhone(userId)) {
+    clearSession(userId);
+    setStep(userId, STEPS.AWAITING_PHONE);
+    return ctx.reply(
+      `🔐 *Подтверждение номера телефона*\n\nДля безопасности системы необходимо подтвердить ваш номер телефона.\n\n📱 Нажмите кнопку ниже:`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.keyboard([[Markup.button.contactRequest('📱 Поделиться номером')]]).resize().oneTime(),
+      }
+    );
   }
 
   // New user — show onboarding card
@@ -329,4 +410,5 @@ module.exports = {
   handleSkipProof,
   handleJoinWaitlist,
   handleStartRegistration,
+  handleContactShare,
 };
