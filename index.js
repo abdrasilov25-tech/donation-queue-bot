@@ -87,9 +87,9 @@ bot.catch((err, ctx) => {
 // Keep-alive HTTP server for Render.com free tier
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (_, res) => res.send('Bot is running'));
-app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
-app.listen(PORT, () => console.log(`✅ HTTP server on port ${PORT}`));
+app.get('/', (req, res) => res.send('Bot is running'));
+app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+app.listen(PORT, '0.0.0.0', () => console.log(`✅ HTTP server on port ${PORT}`));
 
 async function main() {
   try {
