@@ -1,6 +1,7 @@
 const { Markup } = require('telegraf');
 const { markAsPaid, getUserStatus, getStats, banUser, unbanUser, getBannedUsers, addApprovedDonation } = require('../sheets');
 const { getPending, deletePending, getAllPending } = require('../pending');
+const { shiftWaitlist, getWaitlist } = require('../waitlist');
 const { notifyQueueMove } = require('../scheduler');
 const { refreshLiveCounter } = require('../livecounter');
 
@@ -85,17 +86,22 @@ async function approveUser(ctx, targetUserId, isInline = false) {
   // Update live counter in group/channel
   refreshLiveCounter(ctx.telegram).catch(() => {});
 
-  // Notify donor
+  // Notify donor with receipt
   try {
+    const now = new Date().toLocaleString('ru-RU', { timeZone: 'Asia/Almaty', dateStyle: 'short', timeStyle: 'short' });
     await ctx.telegram.sendMessage(
       targetUserId,
       `🎉 *Ваша донация подтверждена!*\n\n` +
-      `💰 Сумма: *${parseFloat(userInfo.amount).toLocaleString('ru-RU')} ₸*\n` +
-      `📍 Ваша позиция в очереди: *#${result.queuePosition}*\n\n` +
-      `📊 *Счёт системы сейчас:*\n` +
-      `💵 Общая сумма заявок: *${stats.totalAllAmount.toLocaleString('ru-RU')} ₸*\n` +
-      `✅ Одобрено: *${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸* (${stats.approvedCount} чел.)\n\n` +
-      `Используйте /balance чтобы видеть счёт в любое время.`,
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🧾 *ЧЕК*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `👤 ${userInfo.name}\n` +
+      `💰 *${parseFloat(userInfo.amount).toLocaleString('ru-RU')} ₸*\n` +
+      `📍 Позиция в очереди: *#${result.queuePosition}*\n` +
+      `🕐 ${now}\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `📊 Общий счёт: *${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸* (${stats.approvedCount} чел.)\n\n` +
+      `Используйте /status чтобы следить за позицией.\n/balance — общий счёт системы`,
       { parse_mode: 'Markdown' }
     );
   } catch {
@@ -235,6 +241,27 @@ async function handlePaid(ctx) {
 
     // Notify others in queue that it moved
     await notifyQueueMove(ctx.telegram ? { telegram: ctx.telegram } : ctx, result.name, result.queuePosition);
+
+    // Notify first person on waitlist that a spot opened
+    const nextWaiting = shiftWaitlist();
+    if (nextWaiting) {
+      await ctx.telegram.sendMessage(
+        nextWaiting.userId,
+        `🔔 *Место в очереди освободилось!*\n\n` +
+        `Вы были в листе ожидания — теперь можете подать заявку:\n\n` +
+        `👉 /start`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => {});
+
+      const remaining = getWaitlist();
+      for (const [i, u] of remaining.entries()) {
+        await ctx.telegram.sendMessage(
+          u.userId,
+          `📋 *Обновление листа ожидания*\n\nВаша позиция: *#${i + 1}*`,
+          { parse_mode: 'Markdown' }
+        ).catch(() => {});
+      }
+    }
 
   } catch (err) {
     console.error('Paid error:', err);

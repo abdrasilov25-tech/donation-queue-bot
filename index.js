@@ -11,7 +11,8 @@ process.on('unhandledRejection', (reason) => {
   console.error('💥 unhandledRejection:', reason);
 });
 const { ensureHeaderRow, ensureConfigSheet } = require('./src/sheets');
-const { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof } = require('./src/handlers/start');
+const { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof, handleJoinWaitlist } = require('./src/handlers/start');
+const { handleRef } = require('./src/handlers/ref');
 const { handleQueue } = require('./src/handlers/queue');
 const { handleStatus } = require('./src/handlers/status');
 const { handleApprove, handleReject, handlePaid, handlePending, handleAdminHelp, handleInlineApprove, handleInlineReject, handleBan, handleUnban } = require('./src/handlers/admin');
@@ -72,6 +73,7 @@ bot.command('history', handleHistory);
 bot.command('faq', handleFaq);
 bot.command('notify', handleNotify);
 bot.command('pay', handlePay);
+bot.command('ref', handleRef);
 
 // Admin commands
 bot.command('approve', handleApprove);
@@ -101,6 +103,7 @@ bot.command('help', (ctx) => {
     '/resubmit — повторная подача (для отклонённых)\n' +
     '/confirm — подтвердить получение выплаты\n' +
     '/faq — частые вопросы\n' +
+    '/ref — реферальная ссылка\n' +
     '/help — помощь',
     { parse_mode: 'Markdown' }
   );
@@ -111,6 +114,9 @@ bot.action(/^pay_/, handlePaymentChoice);
 
 // Inline keyboard: skip proof
 bot.action('skip_proof', handleSkipProof);
+
+// Inline keyboard: join waitlist
+bot.action('join_waitlist', handleJoinWaitlist);
 
 // Inline keyboard: admin one-tap approve/reject from notification
 bot.action(/^adm_approve_/, handleInlineApprove);

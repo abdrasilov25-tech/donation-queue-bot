@@ -1,6 +1,9 @@
 const cron = require('node-cron');
-const { getPendingOlderThan, getApprovedActiveUsers, getStats, healthCheck, createBackup, getNotifyPref } = require('./sheets');
+const { getApprovedActiveUsers, getStats, healthCheck, createBackup, getNotifyPref } = require('./sheets');
+const { getAllPending } = require('./pending');
 const { cleanupStaleSessions } = require('./state');
+
+const remindedUsers = new Set(); // avoid duplicate 48h reminders
 
 function getAdminIds() {
   return (process.env.ADMIN_IDS || '').split(',').map((id) => id.trim()).filter(Boolean);
@@ -10,11 +13,12 @@ function startScheduler(bot) {
   // Every 2 hours: remind admin about pending submissions older than 24h
   cron.schedule('0 */2 * * *', async () => {
     try {
-      const stale = await getPendingOlderThan(24);
+      const now = Date.now();
+      const stale = getAllPending().filter((u) => now - new Date(u.createdAt).getTime() > 24 * 3600000);
       if (stale.length === 0) return;
 
       const lines = stale.map((u, i) => {
-        const hours = Math.floor((Date.now() - new Date(u.createdAt).getTime()) / 3600000);
+        const hours = Math.floor((now - new Date(u.createdAt).getTime()) / 3600000);
         return `${i + 1}. *${u.name}* — ${parseFloat(u.amount).toLocaleString('ru-RU')} ₸\n   ⏰ Ждёт ${hours}ч | ID: \`${u.userId}\``;
       });
 
@@ -30,6 +34,27 @@ function startScheduler(bot) {
       console.log(`⏰ Reminded admins about ${stale.length} stale pending submissions`);
     } catch (err) {
       console.error('Scheduler reminder error:', err.message);
+    }
+  });
+
+  // Every 6 hours: remind users whose submission has been pending >48h
+  cron.schedule('0 */6 * * *', async () => {
+    try {
+      const now = Date.now();
+      const old = getAllPending().filter((u) => now - new Date(u.createdAt).getTime() > 48 * 3600000);
+      for (const u of old) {
+        if (remindedUsers.has(u.userId)) continue;
+        await bot.telegram.sendMessage(
+          u.userId,
+          `⏳ *Ваша заявка всё ещё на проверке*\n\n` +
+          `Мы получили вашу заявку на *${parseFloat(u.amount).toLocaleString('ru-RU')} ₸* и скоро её рассмотрим.\n\n` +
+          `/status — посмотреть текущий статус`,
+          { parse_mode: 'Markdown' }
+        ).catch(() => {});
+        remindedUsers.add(u.userId);
+      }
+    } catch (err) {
+      console.error('User reminder error:', err.message);
     }
   });
 

@@ -2,13 +2,46 @@ const { Markup } = require('telegraf');
 const { STEPS, getSession, setStep, setData, clearSession, isRateLimited } = require('../state');
 const { userExists, getPaidUser, getStats, checkDuplicate, checkPhotoDuplicate, isUserBanned, getApprovedCount, getQueueLimit, getPauseState } = require('../sheets');
 const { setPending, hasPending, getPending } = require('../pending');
+const { recordReferral, getOrCreateRef } = require('../referral');
+const { addToWaitlist, isOnWaitlist, getWaitlistPosition } = require('../waitlist');
 
 function getAdminIds() {
   return (process.env.ADMIN_IDS || '').split(',').map((id) => id.trim()).filter(Boolean);
 }
 
+async function handleJoinWaitlist(ctx) {
+  const userId = ctx.from.id;
+  const name = ctx.from.first_name || 'Участник';
+
+  if (isOnWaitlist(userId)) {
+    const pos = getWaitlistPosition(userId);
+    await ctx.answerCbQuery();
+    return ctx.reply(`📋 Вы уже в листе ожидания на позиции *#${pos}*. Мы уведомим вас когда откроется место.`, { parse_mode: 'Markdown' });
+  }
+
+  addToWaitlist(userId, name);
+  const pos = getWaitlistPosition(userId);
+  await ctx.answerCbQuery('✅ Добавлены в лист ожидания');
+  await ctx.reply(
+    `📋 *Вы добавлены в лист ожидания!*\n\n` +
+    `Ваша позиция: *#${pos}*\n\n` +
+    `Как только в очереди освободится место — вы получите уведомление.`,
+    { parse_mode: 'Markdown' }
+  );
+}
+
 async function handleStart(ctx) {
   const userId = ctx.from.id;
+
+  // Track referral from start payload (e.g. /start ref_12345_abc)
+  const payload = ctx.startPayload;
+  if (payload && payload.startsWith('ref_')) {
+    const referrerId = recordReferral(userId, payload);
+    if (referrerId) {
+      // Will notify referrer after registration completes — store for now
+      setData(userId, 'referredBy', referrerId);
+    }
+  }
 
   try {
     // Check ban first
@@ -34,11 +67,20 @@ async function handleStart(ctx) {
       getApprovedCount().catch(() => 0),
     ]);
     if (limit && approvedCount >= limit) {
+      const alreadyWaiting = isOnWaitlist(userId);
+      const waitPos = alreadyWaiting ? getWaitlistPosition(userId) : null;
       return ctx.reply(
         `⛔ *Очередь заполнена*\n\n` +
         `Сейчас в очереди *${approvedCount}* из *${limit}* мест.\n\n` +
-        `Попробуйте позже или обратитесь к администратору.`,
-        { parse_mode: 'Markdown' }
+        (alreadyWaiting
+          ? `📋 Вы уже в листе ожидания: позиция *#${waitPos}*`
+          : `Встаньте в лист ожидания — мы уведомим вас когда освободится место.`),
+        {
+          parse_mode: 'Markdown',
+          ...(!alreadyWaiting
+            ? Markup.inlineKeyboard([[Markup.button.callback('📋 Встать в лист ожидания', 'join_waitlist')]])
+            : {}),
+        }
       );
     }
 
@@ -337,4 +379,4 @@ async function notifyAdmins(ctx, userId, session, proofLink, proofPhotoId, fileU
   }
 }
 
-module.exports = { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof };
+module.exports = { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof, handleJoinWaitlist };
