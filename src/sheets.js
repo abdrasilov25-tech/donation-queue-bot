@@ -83,6 +83,27 @@ async function addDonation({ userId, name, amount, paymentMethod, proofLink }) {
   }));
 }
 
+// Write directly as approved (called when admin approves pending-cache entry)
+async function addApprovedDonation({ userId, name, amount, paymentMethod, proofLink }) {
+  const sheets = await getClient();
+  const createdAt = new Date().toISOString();
+
+  const rows = await getAllRows();
+  const approvedCount = rows.filter((r) => r[COL.STATUS] === 'approved').length;
+  const queuePosition = approvedCount + 1;
+
+  await withRetry(() => sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!A:I`,
+    valueInputOption: 'RAW',
+    requestBody: {
+      values: [[String(userId), name, amount, paymentMethod, proofLink || '', 'approved', queuePosition, createdAt, '']],
+    },
+  }));
+
+  return queuePosition;
+}
+
 async function updateStatus(userId, status) {
   const found = await findUserRow(userId);
   if (!found) return false;
@@ -439,6 +460,13 @@ async function ensureConfigSheet() {
       spreadsheetId: SPREADSHEET_ID,
       requestBody: { requests: [{ addSheet: { properties: { title: 'Config' } } }] },
     }));
+    // Initialize D1 to '0' so pause is off by default
+    await withRetry(() => sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Config!D1:E1',
+      valueInputOption: 'RAW',
+      requestBody: { values: [['0', '']] },
+    }));
     console.log('✅ Config sheet created automatically');
   }
 }
@@ -770,6 +798,7 @@ async function ensureHeaderRow() {
 
 module.exports = {
   addDonation,
+  addApprovedDonation,
   updateStatus,
   markAsPaid,
   confirmReceipt,
