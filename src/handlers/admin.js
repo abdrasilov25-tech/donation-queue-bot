@@ -57,8 +57,8 @@ async function approveUser(ctx, targetUserId, isInline = false) {
         `🎉 *Новая донация подтверждена!*\n\n` +
         `👤 ${userInfo.name} — *${parseFloat(userInfo.amount).toLocaleString('ru-RU')} ₸*\n` +
         `📍 Позиция в очереди: #${result.queuePosition}\n\n` +
-        `💰 Общая сумма: *${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸*\n` +
-        `👥 Участников: ${stats.approvedCount}\n\n` +
+        `💵 Общая сумма заявок: *${stats.totalAllAmount.toLocaleString('ru-RU')} ₸*\n` +
+        `✅ Одобрено: *${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸* (${stats.approvedCount} чел.)\n\n` +
         `/balance — полный счёт системы`,
         { parse_mode: 'Markdown' }
       );
@@ -74,8 +74,9 @@ async function approveUser(ctx, targetUserId, isInline = false) {
       `🎉 *Ваша донация подтверждена!*\n\n` +
       `💰 Сумма: *${parseFloat(userInfo.amount).toLocaleString('ru-RU')} ₸*\n` +
       `📍 Ваша позиция в очереди: *#${result.queuePosition}*\n\n` +
-      `📊 *Общий счёт системы сейчас:*\n` +
-      `💵 ${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸ от ${stats.approvedCount} участников\n\n` +
+      `📊 *Счёт системы сейчас:*\n` +
+      `💵 Общая сумма заявок: *${stats.totalAllAmount.toLocaleString('ru-RU')} ₸*\n` +
+      `✅ Одобрено: *${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸* (${stats.approvedCount} чел.)\n\n` +
       `Используйте /balance чтобы видеть счёт в любое время.`,
       { parse_mode: 'Markdown' }
     );

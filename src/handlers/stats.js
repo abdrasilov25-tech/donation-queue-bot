@@ -28,9 +28,10 @@ async function handleBalance(ctx) {
     await ctx.reply(
       `📊 *ПУБЛИЧНЫЙ СЧЁТ СИСТЕМЫ*\n` +
       `${'━'.repeat(28)}\n\n` +
-      `💰 *Одобрено:* ${s.totalApprovedAmount.toLocaleString('ru-RU')} ₸\n` +
-      `👥 *В очереди:* ${s.approvedCount}\n` +
-      `⏳ *Ожидают проверки:* ${s.pendingCount}\n` +
+      `💵 *Общая сумма заявок:* ${s.totalAllAmount.toLocaleString('ru-RU')} ₸\n` +
+      `✅ *Одобрено:* ${s.totalApprovedAmount.toLocaleString('ru-RU')} ₸\n` +
+      `👥 *В очереди:* ${s.approvedCount} чел.\n` +
+      `⏳ *Ожидают проверки:* ${s.pendingCount} чел.\n` +
       `📈 *Средняя донация:* ${s.avgAmount.toLocaleString('ru-RU')} ₸\n` +
       (goalLine ? `\n${goalLine}` : '') +
       `\n${'━'.repeat(28)}\n` +
@@ -56,6 +57,7 @@ async function handleStats(ctx) {
       `✅ Одобрено: ${s.approvedCount}\n` +
       `⏳ На проверке: ${s.pendingCount}\n` +
       `❌ Отклонено: ${s.rejectedCount}\n\n` +
+      `💵 Общая сумма заявок: *${s.totalAllAmount.toLocaleString('ru-RU')} ₸*\n` +
       `💰 Сумма одобренных: *${s.totalApprovedAmount.toLocaleString('ru-RU')} ₸*\n` +
       `📊 Средняя донация: ${s.avgAmount.toLocaleString('ru-RU')} ₸`,
       { parse_mode: 'Markdown' }
