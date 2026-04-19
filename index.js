@@ -32,6 +32,7 @@ const { handleStartCounter, handleStopCounter } = require('./src/handlers/counte
 const { handleHistory } = require('./src/handlers/history');
 const { handleFaq } = require('./src/handlers/faq');
 const { handleNotify } = require('./src/handlers/notify');
+const { handlePay } = require('./src/handlers/pay');
 const { getSession, STEPS, isRateLimited } = require('./src/state');
 const { startScheduler } = require('./src/scheduler');
 
@@ -70,6 +71,7 @@ bot.command('stopcounter', handleStopCounter);
 bot.command('history', handleHistory);
 bot.command('faq', handleFaq);
 bot.command('notify', handleNotify);
+bot.command('pay', handlePay);
 
 // Admin commands
 bot.command('approve', handleApprove);
@@ -84,6 +86,7 @@ bot.command('help', (ctx) => {
   ctx.reply(
     '📖 *Команды:*\n\n' +
     '/start — подать заявку\n' +
+    '/pay — реквизиты для перевода\n' +
     '/status — мой статус и позиция\n' +
     '/queue — текущая очередь\n' +
     '/top — топ-10 доноров\n' +

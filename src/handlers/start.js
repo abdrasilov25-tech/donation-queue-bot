@@ -198,13 +198,33 @@ async function handlePaymentChoice(ctx) {
 
   await ctx.answerCbQuery();
   await ctx.editMessageText(`✅ Способ оплаты: ${method}`);
+
+  const amount = session.data.amount;
+  const amountStr = parseFloat(amount).toLocaleString('ru-RU');
+
+  // Show payment details based on method
+  const paymentDetails = method === 'Kaspi'
+    ? `📱 *Kaspi*\n` +
+      `Номер: \`87712472645\`\n` +
+      `Получатель: *Назипа А.*\n\n` +
+      `Сумма к переводу: *${amountStr} ₸*\n\n` +
+      `⚠️ В комментарии к переводу укажите своё имя.`
+    : method === 'Банковская карта'
+    ? `💳 *Банковская карта*\n` +
+      `Номер Kaspi: \`87712472645\`\n` +
+      `Получатель: *Назипа А.*\n\n` +
+      `Сумма к переводу: *${amountStr} ₸*\n\n` +
+      `⚠️ В комментарии укажите своё имя.`
+    : `💵 *Наличные*\n\n` +
+      `Свяжитесь с администратором для передачи наличных.\n` +
+      `Сумма: *${amountStr} ₸*`;
+
   await ctx.reply(
-    '📸 *Отправьте скриншот подтверждения оплаты*\n\n' +
-    'Без доказательства заявка не будет сохранена.\n\n' +
-    'Можно отправить:\n' +
-    '• 📷 Скриншот из Kaspi / банка\n' +
-    '• 🖼 Фото чека\n' +
-    '• 🔗 Ссылку на перевод (текстом)',
+    `💳 *Реквизиты для перевода:*\n` +
+    `${'━'.repeat(28)}\n\n` +
+    paymentDetails +
+    `\n\n${'━'.repeat(28)}\n` +
+    `📸 После перевода отправьте скриншот сюда:`,
     { parse_mode: 'Markdown' }
   );
 }
