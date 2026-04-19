@@ -625,6 +625,103 @@ async function setQueueLimit(limit) {
   }
 }
 
+// History: all rows for a given userId (supports repeat donors)
+async function getUserHistory(userId) {
+  const rows = await getAllRows();
+  return rows
+    .filter((r) => r[COL.USER_ID] === String(userId))
+    .map((r) => ({
+      amount: r[COL.AMOUNT],
+      paymentMethod: r[COL.PAYMENT_METHOD],
+      status: r[COL.STATUS] || 'pending',
+      queuePosition: r[COL.QUEUE_POSITION] || '—',
+      createdAt: r[COL.CREATED_AT],
+      paidAt: r[COL.PAID_AT],
+    }));
+}
+
+// Notify prefs: stored in Config!H column keyed by userId (userId:0/1)
+async function getNotifyPref(userId) {
+  const sheets = await getClient();
+  try {
+    const res = await withRetry(() => sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Config!H1:I',
+    }));
+    const rows = res.data.values || [];
+    const row = rows.find((r) => r[0] === String(userId));
+    return row ? row[1] !== '0' : true; // default: notifications ON
+  } catch {
+    return true;
+  }
+}
+
+async function setNotifyPref(userId, enabled) {
+  const sheets = await getClient();
+  try {
+    const res = await withRetry(() => sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Config!H1:I',
+    }));
+    const rows = res.data.values || [];
+    const idx = rows.findIndex((r) => r[0] === String(userId));
+    if (idx === -1) {
+      await withRetry(() => sheets.spreadsheets.values.append({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Config!H:I',
+        valueInputOption: 'RAW',
+        requestBody: { values: [[String(userId), enabled ? '1' : '0']] },
+      }));
+    } else {
+      await withRetry(() => sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `Config!H${idx + 1}:I${idx + 1}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [[String(userId), enabled ? '1' : '0']] },
+      }));
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Nightly backup: copy all rows to a sheet named Backup_YYYY-MM-DD
+async function createBackup() {
+  const sheets = await getClient();
+  const date = new Date().toISOString().slice(0, 10);
+  const backupSheet = `Backup_${date}`;
+
+  // Get spreadsheet to check if backup sheet already exists
+  const meta = await withRetry(() => sheets.spreadsheets.get({
+    spreadsheetId: SPREADSHEET_ID,
+    fields: 'sheets.properties.title',
+  }));
+  const existing = meta.data.sheets.map((s) => s.properties.title);
+  if (existing.includes(backupSheet)) return backupSheet; // already done today
+
+  // Add new sheet
+  await withRetry(() => sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      requests: [{ addSheet: { properties: { title: backupSheet } } }],
+    },
+  }));
+
+  // Copy all data
+  const rows = await getAllRowsRaw();
+  if (rows.length > 0) {
+    await withRetry(() => sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${backupSheet}!A1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: rows },
+    }));
+  }
+
+  return backupSheet;
+}
+
 async function healthCheck() {
   const sheets = await getClient();
   await withRetry(() => sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID, fields: 'spreadsheetId' }));
@@ -687,6 +784,10 @@ module.exports = {
   unbanUser,
   isUserBanned,
   checkPhotoDuplicate,
+  getUserHistory,
+  getNotifyPref,
+  setNotifyPref,
+  createBackup,
   ensureHeaderRow,
   healthCheck,
 };

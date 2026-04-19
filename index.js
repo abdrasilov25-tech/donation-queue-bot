@@ -29,6 +29,9 @@ const { handleSearch } = require('./src/handlers/search');
 const { handleNote } = require('./src/handlers/note');
 const { handlePause, handleResume } = require('./src/handlers/pause');
 const { handleStartCounter, handleStopCounter } = require('./src/handlers/counter');
+const { handleHistory } = require('./src/handlers/history');
+const { handleFaq } = require('./src/handlers/faq');
+const { handleNotify } = require('./src/handlers/notify');
 const { getSession, STEPS, isRateLimited } = require('./src/state');
 const { startScheduler } = require('./src/scheduler');
 
@@ -64,6 +67,9 @@ bot.command('pause', handlePause);
 bot.command('resume', handleResume);
 bot.command('startcounter', handleStartCounter);
 bot.command('stopcounter', handleStopCounter);
+bot.command('history', handleHistory);
+bot.command('faq', handleFaq);
+bot.command('notify', handleNotify);
 
 // Admin commands
 bot.command('approve', handleApprove);
@@ -87,8 +93,11 @@ bot.command('help', (ctx) => {
     '/edit amount 5000 — изменить сумму (пока pending)\n' +
     '/edit method Kaspi — изменить способ оплаты\n' +
     '/cancel — отменить текущую регистрацию\n' +
+    '/history — история моих заявок\n' +
+    '/notify on|off — уведомления о позиции\n' +
     '/resubmit — повторная подача (для отклонённых)\n' +
     '/confirm — подтвердить получение выплаты\n' +
+    '/faq — частые вопросы\n' +
     '/help — помощь',
     { parse_mode: 'Markdown' }
   );
@@ -131,12 +140,14 @@ bot.catch((err, ctx) => {
   } catch {}
 });
 
-// Keep-alive HTTP server for Render.com free tier
 const app = express();
+app.use(express.json());
+
 const PORT = process.env.PORT || 3000;
+const WEBHOOK_URL = process.env.WEBHOOK_URL; // e.g. https://donation-queue-bot.onrender.com
+
 app.get('/', (req, res) => res.send('Bot is running'));
 app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
-app.listen(PORT, '0.0.0.0', () => console.log(`✅ HTTP server on port ${PORT}`));
 
 async function main() {
   try {
@@ -148,18 +159,30 @@ async function main() {
 
   startScheduler(bot);
 
-  // Retry loop — wins against stale containers
-  while (true) {
-    try {
-      console.log('🚀 Starting bot...');
-      await bot.launch();
-      break;
-    } catch (err) {
-      if (err.response && err.response.error_code === 409) {
-        console.log('⏳ Another instance detected, retrying in 5s...');
-        await new Promise((r) => setTimeout(r, 5000));
-      } else {
-        throw err;
+  if (WEBHOOK_URL) {
+    // Webhook mode — instant response, no polling conflicts
+    const secretPath = `/webhook/${BOT_TOKEN}`;
+    app.use(bot.webhookCallback(secretPath));
+    app.listen(PORT, '0.0.0.0', () => console.log(`✅ HTTP server on port ${PORT}`));
+
+    await bot.telegram.setWebhook(`${WEBHOOK_URL}${secretPath}`);
+    console.log(`🔗 Webhook set: ${WEBHOOK_URL}${secretPath}`);
+  } else {
+    // Fallback: polling mode (local dev)
+    app.listen(PORT, '0.0.0.0', () => console.log(`✅ HTTP server on port ${PORT}`));
+
+    while (true) {
+      try {
+        console.log('🚀 Starting bot (polling)...');
+        await bot.launch();
+        break;
+      } catch (err) {
+        if (err.response && err.response.error_code === 409) {
+          console.log('⏳ Another instance detected, retrying in 5s...');
+          await new Promise((r) => setTimeout(r, 5000));
+        } else {
+          throw err;
+        }
       }
     }
   }
@@ -169,7 +192,8 @@ async function main() {
   for (const adminId of adminIds) {
     await bot.telegram.sendMessage(
       adminId,
-      `🟢 *Бот запущен* (${new Date().toLocaleString('ru-RU', { timeZone: 'Asia/Almaty' })})\n\nСервер: Railway/Render | Версия: умная 2.0`,
+      `🟢 *Бот запущен* (${new Date().toLocaleString('ru-RU', { timeZone: 'Asia/Almaty' })})\n` +
+      `Режим: ${WEBHOOK_URL ? 'Webhook ⚡' : 'Polling'} | Сервер: Render`,
       { parse_mode: 'Markdown' }
     ).catch(() => {});
   }

@@ -1,5 +1,5 @@
 const cron = require('node-cron');
-const { getPendingOlderThan, getApprovedActiveUsers, getStats, healthCheck } = require('./sheets');
+const { getPendingOlderThan, getApprovedActiveUsers, getStats, healthCheck, createBackup, getNotifyPref } = require('./sheets');
 const { cleanupStaleSessions } = require('./state');
 
 function getAdminIds() {
@@ -112,6 +112,23 @@ function startScheduler(bot) {
     }
   });
 
+  // Every day at 02:00: nightly backup
+  cron.schedule('0 2 * * *', async () => {
+    try {
+      const sheetName = await createBackup();
+      console.log(`✅ Nightly backup created: ${sheetName}`);
+    } catch (err) {
+      console.error('Nightly backup error:', err.message);
+      for (const adminId of getAdminIds()) {
+        await bot.telegram.sendMessage(
+          adminId,
+          `⚠️ *Ошибка ночного бэкапа*\n\n${err.message}`,
+          { parse_mode: 'Markdown' }
+        ).catch(() => {});
+      }
+    }
+  });
+
   // Every 15 minutes: clean up stale user sessions
   cron.schedule('*/15 * * * *', () => {
     try {
@@ -121,7 +138,7 @@ function startScheduler(bot) {
     }
   });
 
-  console.log('⏰ Scheduler started (reminders, daily summary, health check, session cleanup)');
+  console.log('⏰ Scheduler started (reminders, daily summary, health check, backup, session cleanup)');
 }
 
 // Notify all approved users when queue moves (called after /paid)
@@ -131,6 +148,9 @@ async function notifyQueueMove(bot, paidName, paidPosition) {
 
     for (const user of active) {
       if (user.effectivePosition <= 3) {
+        const notifyOn = await getNotifyPref(user.userId).catch(() => true);
+        if (!notifyOn) continue;
+
         const msg =
           `📣 *Очередь движется!*\n\n` +
           `✅ *${paidName}* (позиция #${paidPosition}) получил выплату\n\n` +
