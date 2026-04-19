@@ -1,5 +1,6 @@
 const { Markup } = require('telegraf');
-const { updateStatus, markAsPaid, getUserStatus, getPendingUsers, getStats, banUser, unbanUser, getBannedUsers } = require('../sheets');
+const { markAsPaid, getUserStatus, getStats, banUser, unbanUser, getBannedUsers, addApprovedDonation } = require('../sheets');
+const { getPending, deletePending, getAllPending } = require('../pending');
 const { notifyQueueMove } = require('../scheduler');
 const { refreshLiveCounter } = require('../livecounter');
 
@@ -20,17 +21,30 @@ function requireAdmin(ctx) {
 }
 
 async function approveUser(ctx, targetUserId, isInline = false) {
-  const userInfo = await getUserStatus(targetUserId);
-  if (!userInfo) {
-    const msg = `❌ Пользователь с ID ${targetUserId} не найден.`;
-    return isInline ? ctx.answerCbQuery(msg) : ctx.reply(msg);
-  }
-  if (userInfo.status === 'approved') {
-    const msg = `ℹ️ ${userInfo.name} уже одобрен (позиция #${userInfo.queuePosition}).`;
+  const pending = getPending(targetUserId);
+
+  // If already approved (not in pending cache), check Sheets for info
+  if (!pending) {
+    const existing = await getUserStatus(targetUserId).catch(() => null);
+    if (existing && existing.status === 'approved') {
+      const msg = `ℹ️ ${existing.name} уже одобрен (позиция #${existing.queuePosition}).`;
+      return isInline ? ctx.answerCbQuery(msg) : ctx.reply(msg);
+    }
+    const msg = `❌ Заявка от пользователя ${targetUserId} не найдена.`;
     return isInline ? ctx.answerCbQuery(msg) : ctx.reply(msg);
   }
 
-  const result = await updateStatus(targetUserId, 'approved');
+  const queuePosition = await addApprovedDonation({
+    userId: targetUserId,
+    name: pending.name,
+    amount: pending.amount,
+    paymentMethod: pending.paymentMethod,
+    proofLink: pending.proofLink,
+  });
+  deletePending(targetUserId);
+
+  const userInfo = { name: pending.name, amount: pending.amount };
+  const result = { queuePosition };
   const stats = await getStats();
 
   const adminMsg =
@@ -90,14 +104,15 @@ async function approveUser(ctx, targetUserId, isInline = false) {
 }
 
 async function rejectUser(ctx, targetUserId, isInline = false, reason = '') {
-  const userInfo = await getUserStatus(targetUserId);
-  if (!userInfo) {
-    const msg = `❌ Пользователь ${targetUserId} не найден.`;
+  const pending = getPending(targetUserId);
+  if (!pending) {
+    const msg = `❌ Заявка от пользователя ${targetUserId} не найдена.`;
     return isInline ? ctx.answerCbQuery(msg) : ctx.reply(msg);
   }
 
-  await updateStatus(targetUserId, 'rejected');
+  deletePending(targetUserId);
 
+  const userInfo = { name: pending.name, amount: pending.amount };
   const reasonLine = reason ? `\n📝 Причина: ${reason}` : '';
   const adminMsg = `❌ *Отклонено.*\n\n👤 ${userInfo.name} — ${parseFloat(userInfo.amount).toLocaleString('ru-RU')} ₸${reasonLine}`;
 
@@ -230,12 +245,13 @@ async function handlePaid(ctx) {
 async function handlePending(ctx) {
   if (!requireAdmin(ctx)) return;
   try {
-    const pending = await getPendingUsers();
+    const pending = getAllPending();
     if (pending.length === 0) return ctx.reply('✅ Нет заявок, ожидающих проверки.');
 
     for (const u of pending) {
       const isPhoto = u.proofLink && u.proofLink.startsWith('[фото:');
-      const photoId = isPhoto ? u.proofLink.replace('[фото:', '').replace(']', '') : null;
+      const rawId = isPhoto ? u.proofLink.replace('[фото:', '').replace(/\|.*$/, '').replace(']', '') : null;
+      const photoId = rawId || null;
 
       const msg =
         `⏳ *Заявка на проверке*\n\n` +

@@ -1,6 +1,7 @@
 const { Markup } = require('telegraf');
 const { STEPS, getSession, setStep, setData, clearSession, isRateLimited } = require('../state');
-const { addDonation, reAddDonation, userExists, getPaidUser, getStats, checkDuplicate, checkPhotoDuplicate, isUserBanned, getApprovedCount, getQueueLimit, getPauseState } = require('../sheets');
+const { userExists, getPaidUser, getStats, checkDuplicate, checkPhotoDuplicate, isUserBanned, getApprovedCount, getQueueLimit, getPauseState } = require('../sheets');
+const { setPending, hasPending, getPending } = require('../pending');
 
 function getAdminIds() {
   return (process.env.ADMIN_IDS || '').split(',').map((id) => id.trim()).filter(Boolean);
@@ -58,6 +59,14 @@ async function handleStart(ctx) {
         `💳 ${paidUser.paymentMethod}\n\n` +
         `📸 Отправьте скриншот нового перевода для повторной заявки:`,
         { parse_mode: 'Markdown' }
+      );
+    }
+
+    // Check if already submitted (pending in memory)
+    if (hasPending(userId)) {
+      return ctx.reply(
+        '⏳ Ваша заявка уже отправлена на проверку.\n\n' +
+        'Используйте:\n/status — ваш статус\n/queue — очередь\n/balance — общий счёт'
       );
     }
 
@@ -250,16 +259,15 @@ async function submitDonation(ctx, userId, session, proofLink, proofPhotoId, fil
       }
     }
 
-    const donationFn = session.data.isRepeat ? reAddDonation : addDonation;
     const proofValue = proofPhotoId
       ? `[фото:${proofPhotoId}${fileUniqueId ? '|' + fileUniqueId : ''}]`
       : proofLink;
-    await donationFn({
-      userId,
+    setPending(userId, {
       name: session.data.name,
       amount: session.data.amount,
       paymentMethod: session.data.paymentMethod,
       proofLink: proofValue,
+      isRepeat: session.data.isRepeat || false,
     });
 
     setStep(userId, STEPS.DONE);
