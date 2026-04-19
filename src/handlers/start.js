@@ -1,6 +1,10 @@
 const { Markup } = require('telegraf');
 const { STEPS, getSession, setStep, setData, clearSession } = require('../state');
-const { addDonation, userExists } = require('../sheets');
+const { addDonation, userExists, getStats } = require('../sheets');
+
+function getAdminIds() {
+  return (process.env.ADMIN_IDS || '').split(',').map((id) => id.trim()).filter(Boolean);
+}
 
 async function handleStart(ctx) {
   const userId = ctx.from.id;
@@ -8,17 +12,24 @@ async function handleStart(ctx) {
 
   if (exists) {
     return ctx.reply(
-      '✅ Вы уже зарегистрированы!\n\nИспользуйте:\n/status — ваш статус\n/queue — очередь\n/list — список донаций'
+      '✅ Вы уже зарегистрированы!\n\n' +
+      'Используйте:\n/status — ваш статус\n/queue — очередь\n/balance — общий счёт'
     );
   }
 
   clearSession(userId);
   setStep(userId, STEPS.AWAITING_NAME);
 
+  const stats = await getStats().catch(() => null);
+  const totalLine = stats
+    ? `\n💰 Уже собрано: *${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸* (${stats.approvedCount} участников)\n`
+    : '';
+
   await ctx.reply(
-    '👋 Добро пожаловать в систему взаимопомощи!\n\n' +
-    'Давайте зарегистрируем вашу донацию.\n\n' +
-    '📝 Введите ваше имя:'
+    '👋 Добро пожаловать в систему взаимопомощи!\n' +
+    totalLine +
+    '\n📝 Введите ваше имя:',
+    { parse_mode: 'Markdown' }
   );
 }
 
@@ -47,26 +58,36 @@ async function handleMessage(ctx) {
       return ctx.reply(
         '💳 Выберите способ оплаты:',
         Markup.inlineKeyboard([
-          [Markup.button.callback('Kaspi', 'pay_kaspi')],
-          [Markup.button.callback('Банковская карта', 'pay_card')],
-          [Markup.button.callback('Наличные', 'pay_cash')],
+          [Markup.button.callback('📱 Kaspi', 'pay_kaspi')],
+          [Markup.button.callback('💳 Банковская карта', 'pay_card')],
+          [Markup.button.callback('💵 Наличные', 'pay_cash')],
         ])
       );
     }
 
     case STEPS.AWAITING_PROOF: {
-      let proofLink = '';
-      if (text && text !== 'Пропустить') {
-        // Accept URL or any text as proof
-        proofLink = text;
-      }
-      await submitDonation(ctx, userId, session, proofLink);
+      // Text link as proof
+      await submitDonation(ctx, userId, session, text, null);
       break;
     }
 
     default:
       break;
   }
+}
+
+// Handle photo proof (screenshot of payment)
+async function handlePhotoProof(ctx) {
+  const userId = ctx.from.id;
+  const session = getSession(userId);
+
+  if (session.step !== STEPS.AWAITING_PROOF) return;
+
+  const photo = ctx.message.photo;
+  const fileId = photo[photo.length - 1].file_id; // highest resolution
+
+  await ctx.reply('📸 Скриншот получен! Отправляю на проверку...');
+  await submitDonation(ctx, userId, session, '', fileId);
 }
 
 async function handlePaymentChoice(ctx) {
@@ -90,9 +111,16 @@ async function handlePaymentChoice(ctx) {
   await ctx.answerCbQuery();
   await ctx.editMessageText(`✅ Способ оплаты: ${method}`);
   await ctx.reply(
-    '🔗 Отправьте ссылку на подтверждение оплаты (скриншот, чек и т.д.)\n' +
-    'Или нажмите «Пропустить»:',
-    Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'skip_proof')]])
+    '📸 *Отправьте скриншот подтверждения оплаты*\n\n' +
+    'Это нужно для проверки донации. Можно:\n' +
+    '• Скриншот из Kaspi\n' +
+    '• Фото чека\n' +
+    '• Ссылку на перевод\n\n' +
+    'Или пропустите (донация будет на ручной проверке):',
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'skip_proof')]]),
+    }
   );
 }
 
@@ -103,36 +131,85 @@ async function handleSkipProof(ctx) {
   if (session.step !== STEPS.AWAITING_PROOF) return ctx.answerCbQuery();
 
   await ctx.answerCbQuery();
-  await ctx.editMessageText('📎 Подтверждение: не указано');
-  await submitDonation(ctx, userId, session, '');
+  await ctx.editMessageText('📎 Подтверждение: не указано — будет ручная проверка');
+  await submitDonation(ctx, userId, session, '', null);
 }
 
-async function submitDonation(ctx, userId, session, proofLink) {
+async function submitDonation(ctx, userId, session, proofLink, proofPhotoId) {
   try {
     await addDonation({
       userId,
       name: session.data.name,
       amount: session.data.amount,
       paymentMethod: session.data.paymentMethod,
-      proofLink,
+      proofLink: proofPhotoId ? `[фото:${proofPhotoId}]` : proofLink,
     });
 
     setStep(userId, STEPS.DONE);
 
+    // Show user confirmation with current total
+    const stats = await getStats().catch(() => null);
+    const totalLine = stats
+      ? `\n📊 Общий счёт системы: *${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸* (${stats.approvedCount} одобрено)\n`
+      : '';
+
     await ctx.reply(
-      '✅ Ваша заявка принята!\n\n' +
+      '✅ *Заявка принята!*\n\n' +
       `👤 Имя: ${session.data.name}\n` +
-      `💰 Сумма: ${session.data.amount} ₸\n` +
-      `💳 Способ: ${session.data.paymentMethod}\n\n` +
-      '⏳ Статус: *ожидает проверки*\n\n' +
-      'После одобрения администратором вы войдёте в очередь.\n' +
-      'Используйте /status чтобы проверить статус.',
+      `💰 Сумма: ${parseFloat(session.data.amount).toLocaleString('ru-RU')} ₸\n` +
+      `💳 Способ: ${session.data.paymentMethod}\n` +
+      `📎 Доказательство: ${proofPhotoId ? '📸 фото' : proofLink || 'не указано'}\n\n` +
+      '⏳ Статус: *ожидает проверки*\n' +
+      totalLine +
+      '\nВы получите уведомление после проверки.',
       { parse_mode: 'Markdown' }
     );
+
+    // Notify admin with inline approve/reject buttons
+    await notifyAdmins(ctx, userId, session, proofLink, proofPhotoId);
   } catch (err) {
     console.error('Submit error:', err);
-    await ctx.reply('❌ Ошибка при сохранении. Попробуйте позже или обратитесь к администратору.');
+    await ctx.reply('❌ Ошибка при сохранении. Попробуйте позже.');
   }
 }
 
-module.exports = { handleStart, handleMessage, handlePaymentChoice, handleSkipProof };
+async function notifyAdmins(ctx, userId, session, proofLink, proofPhotoId) {
+  const adminIds = getAdminIds();
+  if (adminIds.length === 0) return;
+
+  const caption =
+    `🔔 *Новая заявка на проверку!*\n\n` +
+    `👤 ${session.data.name}\n` +
+    `💰 *${parseFloat(session.data.amount).toLocaleString('ru-RU')} ₸*\n` +
+    `💳 ${session.data.paymentMethod}\n` +
+    `🆔 ID: \`${userId}\`\n` +
+    (proofLink ? `🔗 ${proofLink}` : proofPhotoId ? '📸 Скриншот ниже' : '⚠️ Без доказательства');
+
+  const keyboard = Markup.inlineKeyboard([
+    [
+      Markup.button.callback('✅ Одобрить', `adm_approve_${userId}`),
+      Markup.button.callback('❌ Отклонить', `adm_reject_${userId}`),
+    ],
+  ]);
+
+  for (const adminId of adminIds) {
+    try {
+      if (proofPhotoId) {
+        await ctx.telegram.sendPhoto(adminId, proofPhotoId, {
+          caption,
+          parse_mode: 'Markdown',
+          ...keyboard,
+        });
+      } else {
+        await ctx.telegram.sendMessage(adminId, caption, {
+          parse_mode: 'Markdown',
+          ...keyboard,
+        });
+      }
+    } catch (e) {
+      console.warn(`Could not notify admin ${adminId}:`, e.message);
+    }
+  }
+}
+
+module.exports = { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof };

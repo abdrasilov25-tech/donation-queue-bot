@@ -2,10 +2,10 @@ require('dotenv').config();
 
 const { Telegraf } = require('telegraf');
 const { ensureHeaderRow } = require('./src/sheets');
-const { handleStart, handleMessage, handlePaymentChoice, handleSkipProof } = require('./src/handlers/start');
+const { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof } = require('./src/handlers/start');
 const { handleQueue } = require('./src/handlers/queue');
 const { handleStatus } = require('./src/handlers/status');
-const { handleApprove, handleReject, handlePending, handleAdminHelp } = require('./src/handlers/admin');
+const { handleApprove, handleReject, handlePending, handleAdminHelp, handleInlineApprove, handleInlineReject } = require('./src/handlers/admin');
 const { handleList } = require('./src/handlers/list');
 const { handleBalance, handleStats } = require('./src/handlers/stats');
 const { getSession, STEPS } = require('./src/state');
@@ -33,7 +33,7 @@ bot.command('admin', handleAdminHelp);
 bot.command('help', (ctx) => {
   ctx.reply(
     '📖 *Команды:*\n\n' +
-    '/start — подать заявку на донацию\n' +
+    '/start — подать заявку\n' +
     '/status — мой статус и позиция\n' +
     '/queue — текущая очередь\n' +
     '/balance — публичный счёт (виден всем)\n' +
@@ -44,9 +44,24 @@ bot.command('help', (ctx) => {
   );
 });
 
-// Inline keyboard callbacks
+// Inline keyboard: payment method selection
 bot.action(/^pay_/, handlePaymentChoice);
+
+// Inline keyboard: skip proof
 bot.action('skip_proof', handleSkipProof);
+
+// Inline keyboard: admin one-tap approve/reject from notification
+bot.action(/^adm_approve_/, handleInlineApprove);
+bot.action(/^adm_reject_/, handleInlineReject);
+
+// Photo proof handler (user sends screenshot)
+bot.on('photo', (ctx) => {
+  const userId = ctx.from.id;
+  const session = getSession(userId);
+  if (session.step === STEPS.AWAITING_PROOF) {
+    return handlePhotoProof(ctx);
+  }
+});
 
 // Text message handler for multi-step registration
 bot.on('text', (ctx) => {
