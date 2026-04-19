@@ -74,7 +74,10 @@ bot.on('text', (ctx) => {
 });
 
 bot.catch((err, ctx) => {
-  console.error(`Error for ${ctx.updateType}:`, err);
+  console.error(`Error for ${ctx.updateType}:`, err.message);
+  try {
+    ctx.reply('⚠️ Произошла ошибка. Попробуйте ещё раз или напишите /start').catch(() => {});
+  } catch {}
 });
 
 async function main() {

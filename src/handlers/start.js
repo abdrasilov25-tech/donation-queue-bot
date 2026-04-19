@@ -8,13 +8,19 @@ function getAdminIds() {
 
 async function handleStart(ctx) {
   const userId = ctx.from.id;
-  const exists = await userExists(userId);
 
-  if (exists) {
-    return ctx.reply(
-      '✅ Вы уже зарегистрированы!\n\n' +
-      'Используйте:\n/status — ваш статус\n/queue — очередь\n/balance — общий счёт'
-    );
+  try {
+    const exists = await userExists(userId);
+
+    if (exists) {
+      return ctx.reply(
+        '✅ Вы уже зарегистрированы!\n\n' +
+        'Используйте:\n/status — ваш статус\n/queue — очередь\n/balance — общий счёт'
+      );
+    }
+  } catch (err) {
+    console.error('userExists error:', err.message);
+    // Continue even if sheets fails — let user register
   }
 
   clearSession(userId);
