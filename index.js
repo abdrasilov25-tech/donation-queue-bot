@@ -2,6 +2,14 @@ require('dotenv').config();
 
 const express = require('express');
 const { Telegraf } = require('telegraf');
+
+// Prevent crashes from unhandled errors
+process.on('uncaughtException', (err) => {
+  console.error('💥 uncaughtException:', err.message, err.stack);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('💥 unhandledRejection:', reason);
+});
 const { ensureHeaderRow } = require('./src/sheets');
 const { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof } = require('./src/handlers/start');
 const { handleQueue } = require('./src/handlers/queue');
@@ -12,7 +20,7 @@ const { handleBalance, handleStats, handleSetGoal } = require('./src/handlers/st
 const { handleBroadcast } = require('./src/handlers/broadcast');
 const { handleResubmit } = require('./src/handlers/resubmit');
 const { handleConfirm } = require('./src/handlers/confirm');
-const { getSession, STEPS } = require('./src/state');
+const { getSession, STEPS, isRateLimited } = require('./src/state');
 const { startScheduler } = require('./src/scheduler');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -72,6 +80,7 @@ bot.action(/^adm_reject_/, handleInlineReject);
 // Photo proof handler (user sends screenshot)
 bot.on('photo', (ctx) => {
   const userId = ctx.from.id;
+  if (isRateLimited(userId)) return;
   const session = getSession(userId);
   if (session.step === STEPS.AWAITING_PROOF) {
     return handlePhotoProof(ctx);
@@ -126,6 +135,16 @@ async function main() {
         throw err;
       }
     }
+  }
+
+  // Notify admins that bot (re)started
+  const adminIds = (process.env.ADMIN_IDS || '').split(',').map((id) => id.trim()).filter(Boolean);
+  for (const adminId of adminIds) {
+    await bot.telegram.sendMessage(
+      adminId,
+      `🟢 *Бот запущен* (${new Date().toLocaleString('ru-RU', { timeZone: 'Asia/Almaty' })})\n\nСервер: Railway/Render | Версия: умная 2.0`,
+      { parse_mode: 'Markdown' }
+    ).catch(() => {});
   }
 
   process.once('SIGINT', () => bot.stop('SIGINT'));

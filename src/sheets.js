@@ -19,6 +19,23 @@ const COL = {
 
 let sheetsClient = null;
 
+// Retry wrapper: retries up to 3 times on network/quota errors
+async function withRetry(fn, attempts = 3, delayMs = 1000) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const retryable = err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' ||
+        (err.response && (err.response.status === 429 || err.response.status >= 500));
+      if (!retryable || i === attempts - 1) throw err;
+      console.warn(`⚠️ Sheets retry ${i + 1}/${attempts - 1}: ${err.message}`);
+      // Reset client on connection errors so it re-authenticates
+      if (err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT') sheetsClient = null;
+      await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+    }
+  }
+}
+
 async function getClient() {
   if (sheetsClient) return sheetsClient;
 
@@ -40,10 +57,10 @@ async function getClient() {
 
 async function getAllRows() {
   const sheets = await getClient();
-  const res = await sheets.spreadsheets.values.get({
+  const res = await withRetry(() => sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${SHEET_NAME}!A2:H`,
-  });
+    range: `${SHEET_NAME}!A2:I`,
+  }));
   return res.data.values || [];
 }
 
@@ -56,14 +73,14 @@ async function findUserRow(userId) {
 async function addDonation({ userId, name, amount, paymentMethod, proofLink }) {
   const sheets = await getClient();
   const createdAt = new Date().toISOString();
-  await sheets.spreadsheets.values.append({
+  await withRetry(() => sheets.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${SHEET_NAME}!A:H`,
+    range: `${SHEET_NAME}!A:I`,
     valueInputOption: 'RAW',
     requestBody: {
-      values: [[String(userId), name, amount, paymentMethod, proofLink || '', 'pending', '', createdAt]],
+      values: [[String(userId), name, amount, paymentMethod, proofLink || '', 'pending', '', createdAt, '']],
     },
-  });
+  }));
 }
 
 async function updateStatus(userId, status) {
@@ -79,12 +96,12 @@ async function updateStatus(userId, status) {
     queuePosition = approvedCount + 1;
   }
 
-  await sheets.spreadsheets.values.update({
+  await withRetry(() => sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `${SHEET_NAME}!F${found.rowIndex}:G${found.rowIndex}`,
     valueInputOption: 'RAW',
     requestBody: { values: [[status, queuePosition]] },
-  });
+  }));
 
   return {
     queuePosition,
@@ -182,12 +199,12 @@ async function markAsPaid(userId) {
   if (!found) return false;
 
   const sheets = await getClient();
-  await sheets.spreadsheets.values.update({
+  await withRetry(() => sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `${SHEET_NAME}!F${found.rowIndex}`,
     valueInputOption: 'RAW',
     requestBody: { values: [['awaiting_confirm']] },
-  });
+  }));
 
   return {
     name: found.data[COL.NAME],
@@ -204,12 +221,12 @@ async function confirmReceipt(userId) {
 
   const sheets = await getClient();
   const paidAt = new Date().toISOString();
-  await sheets.spreadsheets.values.update({
+  await withRetry(() => sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `${SHEET_NAME}!F${found.rowIndex}:I${found.rowIndex}`,
     valueInputOption: 'RAW',
     requestBody: { values: [['paid', found.data[COL.QUEUE_POSITION], '', paidAt]] },
-  });
+  }));
 
   return {
     confirmed: true,
@@ -284,12 +301,12 @@ async function resetToResubmit(userId) {
   const found = await findUserRow(userId);
   if (!found) return false;
   const sheets = await getClient();
-  await sheets.spreadsheets.values.update({
+  await withRetry(() => sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `${SHEET_NAME}!F${found.rowIndex}:G${found.rowIndex}`,
     valueInputOption: 'RAW',
     requestBody: { values: [['pending', '']] },
-  });
+  }));
   return true;
 }
 
@@ -326,6 +343,12 @@ async function setGoal(amount) {
 async function userExists(userId) {
   const found = await findUserRow(userId);
   return found !== null;
+}
+
+async function healthCheck() {
+  const sheets = await getClient();
+  await withRetry(() => sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID, fields: 'spreadsheetId' }));
+  return true;
 }
 
 async function ensureHeaderRow() {
@@ -365,4 +388,5 @@ module.exports = {
   checkDuplicate,
   userExists,
   ensureHeaderRow,
+  healthCheck,
 };

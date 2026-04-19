@@ -1,5 +1,5 @@
 const { Markup } = require('telegraf');
-const { STEPS, getSession, setStep, setData, clearSession } = require('../state');
+const { STEPS, getSession, setStep, setData, clearSession, isRateLimited } = require('../state');
 const { addDonation, userExists, getStats, checkDuplicate } = require('../sheets');
 
 function getAdminIds() {
@@ -39,8 +39,15 @@ async function handleStart(ctx) {
   );
 }
 
+const MIN_AMOUNT = 100;
+const MAX_AMOUNT = 5_000_000;
+const MAX_NAME_LEN = 60;
+
 async function handleMessage(ctx) {
   const userId = ctx.from.id;
+
+  if (isRateLimited(userId)) return; // silently drop — too fast
+
   const session = getSession(userId);
   const text = ctx.message.text?.trim();
 
@@ -49,7 +56,8 @@ async function handleMessage(ctx) {
   switch (session.step) {
     case STEPS.AWAITING_NAME: {
       if (text.length < 2) return ctx.reply('❌ Имя слишком короткое. Попробуйте снова:');
-      setData(userId, 'name', text);
+      if (text.length > MAX_NAME_LEN) return ctx.reply(`❌ Имя слишком длинное (макс. ${MAX_NAME_LEN} символов):`);
+      setData(userId, 'name', text.replace(/[<>]/g, ''));
       setStep(userId, STEPS.AWAITING_AMOUNT);
       return ctx.reply('💰 Введите сумму донации (только цифры, например: 5000):');
     }
@@ -58,6 +66,12 @@ async function handleMessage(ctx) {
       const amount = parseFloat(text.replace(/[^0-9.]/g, ''));
       if (isNaN(amount) || amount <= 0) {
         return ctx.reply('❌ Введите корректную сумму (только цифры). Например: 5000');
+      }
+      if (amount < MIN_AMOUNT) {
+        return ctx.reply(`❌ Минимальная сумма донации — ${MIN_AMOUNT.toLocaleString('ru-RU')} ₸`);
+      }
+      if (amount > MAX_AMOUNT) {
+        return ctx.reply(`❌ Максимальная сумма — ${MAX_AMOUNT.toLocaleString('ru-RU')} ₸. Введите корректную сумму:`);
       }
       setData(userId, 'amount', amount);
       setStep(userId, STEPS.AWAITING_PAYMENT);

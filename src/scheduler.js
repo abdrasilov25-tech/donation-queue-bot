@@ -1,5 +1,6 @@
 const cron = require('node-cron');
-const { getPendingOlderThan, getApprovedActiveUsers } = require('./sheets');
+const { getPendingOlderThan, getApprovedActiveUsers, getStats, healthCheck } = require('./sheets');
+const { cleanupStaleSessions } = require('./state');
 
 function getAdminIds() {
   return (process.env.ADMIN_IDS || '').split(',').map((id) => id.trim()).filter(Boolean);
@@ -20,7 +21,7 @@ function startScheduler(bot) {
       const msg =
         `⚠️ *Ожидают проверки более 24 часов:*\n\n` +
         lines.join('\n\n') +
-        `\n\n👉 Используйте /pending чтобы одобрить или отклонить`;
+        `\n\n👉 /pending — одобрить или отклонить`;
 
       for (const adminId of getAdminIds()) {
         await bot.telegram.sendMessage(adminId, msg, { parse_mode: 'Markdown' }).catch(() => {});
@@ -35,15 +36,15 @@ function startScheduler(bot) {
   // Every day at 09:00: morning summary to admin
   cron.schedule('0 9 * * *', async () => {
     try {
-      const { getStats } = require('./sheets');
       const stats = await getStats();
-      const queue = await getApprovedActiveUsers();
 
       const msg =
         `☀️ *Утренняя сводка*\n\n` +
-        `💰 Собрано: *${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸*\n` +
+        `💵 Общая сумма заявок: *${stats.totalAllAmount.toLocaleString('ru-RU')} ₸*\n` +
+        `✅ Одобрено: *${stats.totalApprovedAmount.toLocaleString('ru-RU')} ₸*\n` +
         `👥 В очереди: ${stats.approvedCount}\n` +
         `⏳ Ожидают: ${stats.pendingCount}\n` +
+        `❌ Отклонено: ${stats.rejectedCount}\n` +
         `📈 Средняя донация: ${stats.avgAmount.toLocaleString('ru-RU')} ₸\n\n` +
         (stats.pendingCount > 0
           ? `⚠️ *${stats.pendingCount} заявок ждут проверки* → /pending`
@@ -57,7 +58,33 @@ function startScheduler(bot) {
     }
   });
 
-  console.log('⏰ Scheduler started');
+  // Every 30 minutes: health check Google Sheets
+  cron.schedule('*/30 * * * *', async () => {
+    try {
+      await healthCheck();
+      console.log('✅ Sheets health check OK');
+    } catch (err) {
+      console.error('❌ Sheets health check FAILED:', err.message);
+      for (const adminId of getAdminIds()) {
+        await bot.telegram.sendMessage(
+          adminId,
+          `🚨 *Проблема с Google Sheets!*\n\n${err.message}\n\nДанные могут не сохраняться. Проверьте доступ.`,
+          { parse_mode: 'Markdown' }
+        ).catch(() => {});
+      }
+    }
+  });
+
+  // Every 15 minutes: clean up stale user sessions
+  cron.schedule('*/15 * * * *', () => {
+    try {
+      cleanupStaleSessions();
+    } catch (err) {
+      console.error('Session cleanup error:', err.message);
+    }
+  });
+
+  console.log('⏰ Scheduler started (reminders, daily summary, health check, session cleanup)');
 }
 
 // Notify all approved users when queue moves (called after /paid)
@@ -67,7 +94,6 @@ async function notifyQueueMove(bot, paidName, paidPosition) {
 
     for (const user of active) {
       if (user.effectivePosition <= 3) {
-        // Only notify top 3 — others don't need to know yet
         const msg =
           `📣 *Очередь движется!*\n\n` +
           `✅ *${paidName}* (позиция #${paidPosition}) получил выплату\n\n` +
