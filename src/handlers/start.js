@@ -97,7 +97,7 @@ async function handleStart(ctx) {
   );
 }
 
-const MIN_AMOUNT = 1000;
+const MIN_AMOUNT = 100;
 const MAX_AMOUNT = 5_000_000;
 const MAX_NAME_LEN = 60;
 
