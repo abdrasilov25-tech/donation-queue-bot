@@ -88,7 +88,7 @@ async function handleStart(ctx) {
   );
 }
 
-const MIN_AMOUNT = 100;
+const MIN_AMOUNT = 1000;
 const MAX_AMOUNT = 5_000_000;
 const MAX_NAME_LEN = 60;
 
@@ -117,7 +117,7 @@ async function handleMessage(ctx) {
         return ctx.reply('❌ Введите корректную сумму (только цифры). Например: 5000');
       }
       if (amount < MIN_AMOUNT) {
-        return ctx.reply(`❌ Минимальная сумма донации — ${MIN_AMOUNT.toLocaleString('ru-RU')} ₸`);
+        return ctx.reply(`❌ Минимальная сумма — <b>${MIN_AMOUNT.toLocaleString('ru-RU')} ₸</b>`, { parse_mode: 'HTML' });
       }
       if (amount > MAX_AMOUNT) {
         return ctx.reply(`❌ Максимальная сумма — ${MAX_AMOUNT.toLocaleString('ru-RU')} ₸. Введите корректную сумму:`);
@@ -202,30 +202,28 @@ async function handlePaymentChoice(ctx) {
   const amount = session.data.amount;
   const amountStr = parseFloat(amount).toLocaleString('ru-RU');
 
-  // Show payment details based on method
-  const paymentDetails = method === 'Kaspi'
-    ? `📱 *Kaspi*\n` +
-      `Номер: \`87712472645\`\n` +
-      `Получатель: *Назипа А.*\n\n` +
-      `Сумма к переводу: *${amountStr} ₸*\n\n` +
-      `⚠️ В комментарии к переводу укажите своё имя.`
-    : method === 'Банковская карта'
-    ? `💳 *Банковская карта*\n` +
-      `Номер Kaspi: \`87712472645\`\n` +
-      `Получатель: *Назипа А.*\n\n` +
-      `Сумма к переводу: *${amountStr} ₸*\n\n` +
-      `⚠️ В комментарии укажите своё имя.`
-    : `💵 *Наличные*\n\n` +
+  let detailsHtml;
+  if (method === 'Наличные') {
+    detailsHtml =
+      `💵 <b>Наличные</b>\n\n` +
       `Свяжитесь с администратором для передачи наличных.\n` +
-      `Сумма: *${amountStr} ₸*`;
+      `Сумма: <b>${amountStr} ₸</b>`;
+  } else {
+    detailsHtml =
+      `📱 <b>Kaspi</b>\n` +
+      `Номер: <code>87712472645</code>\n` +
+      `Получатель: <b>Назипа А.</b>\n\n` +
+      `Сумма к переводу: <b>${amountStr} ₸</b>\n\n` +
+      `⚠️ В комментарии к переводу укажите своё имя.`;
+  }
 
   await ctx.reply(
-    `💳 *Реквизиты для перевода:*\n` +
-    `${'━'.repeat(28)}\n\n` +
-    paymentDetails +
-    `\n\n${'━'.repeat(28)}\n` +
+    `💳 <b>Реквизиты для перевода:</b>\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    detailsHtml +
+    `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
     `📸 После перевода отправьте скриншот сюда:`,
-    { parse_mode: 'Markdown' }
+    { parse_mode: 'HTML' }
   );
 }
 
