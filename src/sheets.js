@@ -310,6 +310,73 @@ async function resetToResubmit(userId) {
   return true;
 }
 
+// Ban system — stored in Config!C column
+async function getBannedUsers() {
+  const sheets = await getClient();
+  try {
+    const res = await withRetry(() => sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Config!C1:C',
+    }));
+    return (res.data.values || []).map((r) => String(r[0])).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function banUser(userId) {
+  const banned = await getBannedUsers();
+  if (banned.includes(String(userId))) return true;
+  banned.push(String(userId));
+  const sheets = await getClient();
+  await withRetry(() => sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'Config!C1',
+    valueInputOption: 'RAW',
+    requestBody: { values: banned.map((id) => [id]) },
+  }));
+  return true;
+}
+
+async function unbanUser(userId) {
+  const banned = await getBannedUsers();
+  const updated = banned.filter((id) => id !== String(userId));
+  const sheets = await getClient();
+  // Clear column first, then rewrite
+  await withRetry(() => sheets.spreadsheets.values.clear({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'Config!C1:C',
+  }));
+  if (updated.length > 0) {
+    await withRetry(() => sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Config!C1',
+      valueInputOption: 'RAW',
+      requestBody: { values: updated.map((id) => [id]) },
+    }));
+  }
+  return true;
+}
+
+async function isUserBanned(userId) {
+  const banned = await getBannedUsers();
+  return banned.includes(String(userId));
+}
+
+// Check for duplicate photo by file_unique_id (stored as [фото:fileId|uniqueId])
+async function checkPhotoDuplicate(userId, fileUniqueId) {
+  if (!fileUniqueId) return null;
+  const rows = await getAllRows();
+  const found = rows.find((r) => {
+    if (r[COL.USER_ID] === String(userId)) return false;
+    const proof = r[COL.PROOF_LINK] || '';
+    if (!proof.startsWith('[фото:')) return false;
+    const parts = proof.replace('[фото:', '').replace(']', '').split('|');
+    return parts[1] === fileUniqueId;
+  });
+  return found ? { name: found[COL.NAME], userId: found[COL.USER_ID] } : null;
+}
+
 // Get or set fundraising goal (stored in a named range or separate sheet cell)
 async function getGoal() {
   const sheets = await getClient();
@@ -470,6 +537,11 @@ module.exports = {
   getApprovedCount,
   getQueueLimit,
   setQueueLimit,
+  getBannedUsers,
+  banUser,
+  unbanUser,
+  isUserBanned,
+  checkPhotoDuplicate,
   ensureHeaderRow,
   healthCheck,
 };

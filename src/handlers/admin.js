@@ -1,5 +1,5 @@
 const { Markup } = require('telegraf');
-const { updateStatus, markAsPaid, getUserStatus, getPendingUsers, getStats } = require('../sheets');
+const { updateStatus, markAsPaid, getUserStatus, getPendingUsers, getStats, banUser, unbanUser, getBannedUsers } = require('../sheets');
 const { notifyQueueMove } = require('../scheduler');
 
 function getAdminIds() {
@@ -85,7 +85,7 @@ async function approveUser(ctx, targetUserId, isInline = false) {
   }
 }
 
-async function rejectUser(ctx, targetUserId, isInline = false) {
+async function rejectUser(ctx, targetUserId, isInline = false, reason = '') {
   const userInfo = await getUserStatus(targetUserId);
   if (!userInfo) {
     const msg = `❌ Пользователь ${targetUserId} не найден.`;
@@ -94,7 +94,8 @@ async function rejectUser(ctx, targetUserId, isInline = false) {
 
   await updateStatus(targetUserId, 'rejected');
 
-  const adminMsg = `❌ *Отклонено.*\n\n👤 ${userInfo.name} — ${parseFloat(userInfo.amount).toLocaleString('ru-RU')} ₸`;
+  const reasonLine = reason ? `\n📝 Причина: ${reason}` : '';
+  const adminMsg = `❌ *Отклонено.*\n\n👤 ${userInfo.name} — ${parseFloat(userInfo.amount).toLocaleString('ru-RU')} ₸${reasonLine}`;
 
   if (isInline) {
     await ctx.answerCbQuery('❌ Отклонено');
@@ -108,7 +109,13 @@ async function rejectUser(ctx, targetUserId, isInline = false) {
   try {
     await ctx.telegram.sendMessage(
       targetUserId,
-      `❌ Ваша заявка была отклонена.\n\nОбратитесь к администратору за подробностями.`
+      `❌ *Ваша заявка отклонена.*\n\n` +
+      (reason
+        ? `📝 *Причина:* ${reason}\n\n`
+        : '') +
+      `Если считаете это ошибкой — обратитесь к администратору.\n` +
+      `Для повторной подачи: /resubmit`,
+      { parse_mode: 'Markdown' }
     );
   } catch {
     // ignored
@@ -154,9 +161,10 @@ async function handleApprove(ctx) {
 async function handleReject(ctx) {
   if (!requireAdmin(ctx)) return;
   const args = ctx.message.text.split(' ');
-  if (args.length < 2) return ctx.reply('❌ Использование: /reject <user_id>');
+  if (args.length < 2) return ctx.reply('❌ Использование: /reject <user_id> [причина]');
+  const reason = args.slice(2).join(' ').trim();
   try {
-    await rejectUser(ctx, args[1].trim(), false);
+    await rejectUser(ctx, args[1].trim(), false, reason);
   } catch (err) {
     console.error('Reject error:', err);
     await ctx.reply('❌ Ошибка при обновлении статуса.');
@@ -252,14 +260,73 @@ async function handlePending(ctx) {
   }
 }
 
+async function handleBan(ctx) {
+  if (!requireAdmin(ctx)) return;
+  const args = ctx.message.text.split(' ');
+  if (args.length < 2) return ctx.reply('❌ Использование: /ban <user_id>');
+
+  const targetId = args[1].trim();
+  try {
+    const userInfo = await getUserStatus(targetId).catch(() => null);
+    await banUser(targetId);
+
+    await ctx.reply(
+      `🚫 *Пользователь заблокирован*\n\n` +
+      `🆔 ID: \`${targetId}\`\n` +
+      (userInfo ? `👤 ${userInfo.name}` : '') +
+      `\n\nОн больше не сможет подавать заявки.\n/unban ${targetId} — разблокировать`,
+      { parse_mode: 'Markdown' }
+    );
+
+    // Notify the banned user
+    await ctx.telegram.sendMessage(
+      targetId,
+      `🚫 Ваш аккаунт заблокирован администратором.\n\nВы не можете подавать новые заявки.`
+    ).catch(() => {});
+  } catch (err) {
+    console.error('Ban error:', err);
+    await ctx.reply('❌ Ошибка при блокировке.');
+  }
+}
+
+async function handleUnban(ctx) {
+  if (!requireAdmin(ctx)) return;
+  const args = ctx.message.text.split(' ');
+  if (args.length < 2) {
+    const banned = await getBannedUsers().catch(() => []);
+    if (banned.length === 0) return ctx.reply('✅ Нет заблокированных пользователей.');
+    return ctx.reply(
+      `🚫 *Заблокированные:*\n\n` +
+      banned.map((id, i) => `${i + 1}. \`${id}\``).join('\n') +
+      `\n\n/unban <user_id> — разблокировать`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  const targetId = args[1].trim();
+  try {
+    await unbanUser(targetId);
+    await ctx.reply(`✅ Пользователь \`${targetId}\` разблокирован.`, { parse_mode: 'Markdown' });
+    await ctx.telegram.sendMessage(
+      targetId,
+      `✅ Ваш аккаунт разблокирован. Вы можете снова подавать заявки: /start`
+    ).catch(() => {});
+  } catch (err) {
+    console.error('Unban error:', err);
+    await ctx.reply('❌ Ошибка при разблокировке.');
+  }
+}
+
 async function handleAdminHelp(ctx) {
   if (!requireAdmin(ctx)) return;
   await ctx.reply(
     '🔧 *Команды администратора:*\n\n' +
     '/pending — список ожидающих (с кнопками ✅/❌)\n' +
     '/approve <user\\_id> — одобрить вручную\n' +
-    '/reject <user\\_id> — отклонить вручную\n' +
+    '/reject <user\\_id> [причина] — отклонить с причиной\n' +
     '/paid <user\\_id> — подтвердить выплату\n' +
+    '/ban <user\\_id> — заблокировать пользователя\n' +
+    '/unban [user\\_id] — разблокировать / список\n' +
     '/broadcast <текст> — рассылка всем\n' +
     '/export — выгрузить CSV файл\n' +
     '/health — статус бота и Sheets\n' +
@@ -268,9 +335,10 @@ async function handleAdminHelp(ctx) {
     '/queue — полная очередь\n' +
     '/stats — статистика\n\n' +
     '🔄 *Цикл:* pending → approved → awaiting\\_confirm → paid\n' +
+    '🚨 Одинаковый скриншот от двух пользователей — автоматическое предупреждение\n' +
     '💡 При новой заявке вы получаете уведомление — просто нажмите ✅ или ❌',
     { parse_mode: 'Markdown' }
   );
 }
 
-module.exports = { handleApprove, handleReject, handlePaid, handlePending, handleAdminHelp, handleInlineApprove, handleInlineReject, isAdmin };
+module.exports = { handleApprove, handleReject, handlePaid, handlePending, handleAdminHelp, handleInlineApprove, handleInlineReject, handleBan, handleUnban, isAdmin };

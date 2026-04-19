@@ -14,7 +14,7 @@ const { ensureHeaderRow } = require('./src/sheets');
 const { handleStart, handleMessage, handlePhotoProof, handlePaymentChoice, handleSkipProof } = require('./src/handlers/start');
 const { handleQueue } = require('./src/handlers/queue');
 const { handleStatus } = require('./src/handlers/status');
-const { handleApprove, handleReject, handlePaid, handlePending, handleAdminHelp, handleInlineApprove, handleInlineReject } = require('./src/handlers/admin');
+const { handleApprove, handleReject, handlePaid, handlePending, handleAdminHelp, handleInlineApprove, handleInlineReject, handleBan, handleUnban } = require('./src/handlers/admin');
 const { handleList } = require('./src/handlers/list');
 const { handleBalance, handleStats, handleSetGoal } = require('./src/handlers/stats');
 const { handleBroadcast } = require('./src/handlers/broadcast');
@@ -55,6 +55,8 @@ bot.command('reject', handleReject);
 bot.command('paid', handlePaid);
 bot.command('pending', handlePending);
 bot.command('admin', handleAdminHelp);
+bot.command('ban', handleBan);
+bot.command('unban', handleUnban);
 
 bot.command('help', (ctx) => {
   ctx.reply(

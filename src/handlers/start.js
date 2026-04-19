@@ -1,6 +1,6 @@
 const { Markup } = require('telegraf');
 const { STEPS, getSession, setStep, setData, clearSession, isRateLimited } = require('../state');
-const { addDonation, reAddDonation, userExists, getPaidUser, getStats, checkDuplicate, getApprovedCount, getQueueLimit } = require('../sheets');
+const { addDonation, reAddDonation, userExists, getPaidUser, getStats, checkDuplicate, checkPhotoDuplicate, isUserBanned, getApprovedCount, getQueueLimit } = require('../sheets');
 
 function getAdminIds() {
   return (process.env.ADMIN_IDS || '').split(',').map((id) => id.trim()).filter(Boolean);
@@ -10,6 +10,12 @@ async function handleStart(ctx) {
   const userId = ctx.from.id;
 
   try {
+    // Check ban first
+    const banned = await isUserBanned(userId).catch(() => false);
+    if (banned) {
+      return ctx.reply('🚫 Вы заблокированы и не можете подавать заявки.');
+    }
+
     // Check queue limit before allowing new registration
     const [limit, approvedCount] = await Promise.all([
       getQueueLimit().catch(() => null),
@@ -138,10 +144,27 @@ async function handlePhotoProof(ctx) {
   if (session.step !== STEPS.AWAITING_PROOF) return;
 
   const photo = ctx.message.photo;
-  const fileId = photo[photo.length - 1].file_id; // highest resolution
+  const best = photo[photo.length - 1];
+  const fileId = best.file_id;
+  const fileUniqueId = best.file_unique_id;
+
+  // Check if this exact photo was used by another user
+  const photoDup = await checkPhotoDuplicate(userId, fileUniqueId).catch(() => null);
+  if (photoDup) {
+    const adminIds = getAdminIds();
+    for (const adminId of adminIds) {
+      await ctx.telegram.sendMessage(
+        adminId,
+        `🚨 *Одинаковый скриншот!*\n\n` +
+        `Пользователь *${session.data.name}* (ID: \`${userId}\`) прислал тот же скриншот, что и *${photoDup.name}* (ID: \`${photoDup.userId}\`).\n\n` +
+        `Возможное мошенничество — проверьте перед одобрением!`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => {});
+    }
+  }
 
   await ctx.reply('📸 Скриншот получен! Отправляю на проверку...');
-  await submitDonation(ctx, userId, session, '', fileId);
+  await submitDonation(ctx, userId, session, '', fileId, fileUniqueId);
 }
 
 async function handlePaymentChoice(ctx) {
@@ -180,7 +203,7 @@ async function handleSkipProof(ctx) {
   await ctx.answerCbQuery('❌ Доказательство обязательно', { show_alert: true });
 }
 
-async function submitDonation(ctx, userId, session, proofLink, proofPhotoId) {
+async function submitDonation(ctx, userId, session, proofLink, proofPhotoId, fileUniqueId = null) {
   try {
     // Duplicate detection: same amount + method from different user in last 24h
     const duplicate = await checkDuplicate(userId, session.data.amount, session.data.paymentMethod).catch(() => null);
@@ -199,12 +222,15 @@ async function submitDonation(ctx, userId, session, proofLink, proofPhotoId) {
     }
 
     const donationFn = session.data.isRepeat ? reAddDonation : addDonation;
+    const proofValue = proofPhotoId
+      ? `[фото:${proofPhotoId}${fileUniqueId ? '|' + fileUniqueId : ''}]`
+      : proofLink;
     await donationFn({
       userId,
       name: session.data.name,
       amount: session.data.amount,
       paymentMethod: session.data.paymentMethod,
-      proofLink: proofPhotoId ? `[фото:${proofPhotoId}]` : proofLink,
+      proofLink: proofValue,
     });
 
     setStep(userId, STEPS.DONE);
@@ -228,14 +254,14 @@ async function submitDonation(ctx, userId, session, proofLink, proofPhotoId) {
     );
 
     // Notify admin with inline approve/reject buttons
-    await notifyAdmins(ctx, userId, session, proofLink, proofPhotoId);
+    await notifyAdmins(ctx, userId, session, proofLink, proofPhotoId, fileUniqueId);
   } catch (err) {
     console.error('Submit error:', err);
     await ctx.reply('❌ Ошибка при сохранении. Попробуйте позже.');
   }
 }
 
-async function notifyAdmins(ctx, userId, session, proofLink, proofPhotoId) {
+async function notifyAdmins(ctx, userId, session, proofLink, proofPhotoId, fileUniqueId = null) {
   const adminIds = getAdminIds();
   if (adminIds.length === 0) return;
 
